@@ -124,7 +124,7 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
     Log.W("|---------|---------|------------|------------|")
     for Index in range(NumberOfEpisodes):
         Log.W(f"| {Index+1:<7} | {round(RunningLoss[Index],5):<7} | {round(100*RunningAccuracy[Index],7):<10} | {round(100*RunningValidationAccuracy[Index],7):<10} |")
-    Log.W("*--------------------------------*")
+    Log.W("*---------------------------------------------*")
 
     with open(f"{Controls.OutputPath}TrainingProcess.csv", "w") as TrainingProcessCsv:
         TrainingProcessCsv.write("Episode Index,         Loss, Validation Accuracy\n")
