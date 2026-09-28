@@ -33,7 +33,7 @@ class ControlVariables:
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo : bool = True
+    WriteDetailedDebugInfo : bool = False
     
     # Parameter initialisation
     NumberOfClasses : int = 0 # K
@@ -68,7 +68,9 @@ def Main():
     RunningLoss               = []
     RunningAccuracy           = []
     RunningValidationAccuracy = []
-    for EpisodeIndex in tqdm(range(1, Controls.NumberOfEpisodes + 1), desc="Training", unit="ep"):
+
+    print("Main training loop")
+    for EpisodeIndex in tqdm(range(1, Controls.NumberOfEpisodes + 1), desc="Progress", unit="ep"):
         if Controls.WriteDetailedDebugInfo:
             LogFile.W(f"\nEpisode {EpisodeIndex:>5} out of {Controls.NumberOfEpisodes:>5}")
 
@@ -81,6 +83,8 @@ def Main():
 
         Loss.backward()
         Optimizer.step()
+
+    print(f"Final validation Accuracy: {round(100*LossInfo["ValidationAccuracy"],3)} %")
 
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
 

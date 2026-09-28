@@ -125,6 +125,13 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
     for Index in range(NumberOfEpisodes):
         Log.W(f"| {Index+1:<7} | {round(RunningLoss[Index],5):<7} | {round(100*RunningAccuracy[Index],7):<10} | {round(100*RunningValidationAccuracy[Index],7):<10} |")
     Log.W("*---------------------------------------------*")
+    StandardDeviationCutOff = int(NumberOfEpisodes/10)
+    if StandardDeviationCutOff > 0:
+        LossStandardDeviation   = np.std(RunningLoss[-StandardDeviationCutOff:])
+        ValAccStandardDeviation = np.std([100*Entry for Entry in RunningValidationAccuracy[-StandardDeviationCutOff:]])
+        Log.W(f"Standard deviation during the last 10% of training episodes")
+        Log.W(f"Loss               : {round(LossStandardDeviation,3)}")
+        Log.W(f"Validation Accuracy: {round(ValAccStandardDeviation,3)} %")
 
     with open(f"{Controls.OutputPath}TrainingProcess.csv", "w") as TrainingProcessCsv:
         TrainingProcessCsv.write("Episode Index,         Loss, Validation Accuracy\n")
