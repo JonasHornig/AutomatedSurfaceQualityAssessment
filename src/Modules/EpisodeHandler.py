@@ -58,12 +58,12 @@ class EpisodeLoader():
             ValidationIndices : list[int] = AllIndices[QueryRange   :             ].tolist()
         
             IndexedSupportTensors = []
-            for Index in ValidationIndices:
+            for Index in SupportIndices:
                 IndexedSupportTensors.append(self.Images[Class.split("_")[0]][Class.split("_")[1]][Mode]["DinoFeatures"][Index])
             SupportTensors.append(torch.stack(IndexedSupportTensors))
         
             IndexedQueryTensors = []
-            for Index in ValidationIndices:
+            for Index in QueryIndices:
                 IndexedQueryTensors.append(self.Images[Class.split("_")[0]][Class.split("_")[1]][Mode]["DinoFeatures"][Index])
             QueryTensors.append(torch.stack(IndexedQueryTensors))
         

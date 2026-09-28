@@ -33,7 +33,7 @@ class ControlVariables:
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo : bool = False
+    WriteDetailedDebugInfo : bool = True
     
     # Parameter initialisation
     NumberOfClasses : int = 0 # K
@@ -65,8 +65,9 @@ def Main():
     EpisodeLoader.GenerateLabelMap(Controls.OutputPath)
     LOG.WritelabelMap(LogFile, EpisodeLoader.LabelMap)
 
-    RunningLoss     = []
-    RunningAccuracy = []
+    RunningLoss               = []
+    RunningAccuracy           = []
+    RunningValidationAccuracy = []
     for EpisodeIndex in tqdm(range(1, Controls.NumberOfEpisodes + 1), desc="Training", unit="ep"):
         if Controls.WriteDetailedDebugInfo:
             LogFile.W(f"\nEpisode {EpisodeIndex:>5} out of {Controls.NumberOfEpisodes:>5}")
@@ -75,12 +76,13 @@ def Main():
         Loss, LossInfo = ProtoNet.CalculateLoss(ActiveEpisode)
 
         RunningLoss.append(LossInfo["Loss"])
-        RunningAccuracy.append(LossInfo["ValidationAccuracy"])
+        RunningAccuracy.append(LossInfo["Accuracy"])
+        RunningValidationAccuracy.append(LossInfo["ValidationAccuracy"])
 
         Loss.backward()
         Optimizer.step()
 
-    LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy)
+    LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
 
     LogFile.W(f"\nTraining complete")
     Duration = time.time() - StartTime
