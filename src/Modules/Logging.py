@@ -115,12 +115,9 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
     NumberOfEpisodes = len(RunningAccuracy)
     Episodes = [Episode for Episode in range(NumberOfEpisodes)]
 
-    Log.W("\nResults of the training process:")
-    Log.W("----------------------------------")
-
-    Log.W("*---------------------------------------------*")
+    Log.W("\n*---------------------------------------------*")
     Log.W("| Episode | Loss    | Accuracy   | Validation |")
-    Log.W("| Index   |         |            | Accuracy   |")
+    Log.W("|         |         |            | Accuracy   |")
     Log.W("|---------|---------|------------|------------|")
     for Index in range(NumberOfEpisodes):
         Log.W(f"| {Index+1:<7} | {round(RunningLoss[Index],5):<7} | {round(100*RunningAccuracy[Index],7):<10} | {round(100*RunningValidationAccuracy[Index],7):<10} |")
@@ -165,3 +162,35 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
     plt.tight_layout()
     LossAxis.ticklabel_format(useOffset=False, style="plain")
     plt.savefig(f"{Controls.OutputPath}/TrainingInfo.png")
+
+def DataExtraction_One(Log, Name, FeatureTensor, Label, LabelIndex, PositionIndex):
+    Log.W(f"{PositionIndex:>5} ", NewLine=False)
+    Log.W(f"{Name:<50} ", NewLine=False)
+    Log.W(f"{Label:<20} ", NewLine=False)
+    Log.W(f"{LabelIndex:<5} ", NewLine=False)
+    FeatureTensorFront = FeatureTensor[:5]
+    FeatureTensorBack  = FeatureTensor[-5:-1]
+    Log.W("[ ", NewLine=False)
+    for Entry in FeatureTensorFront:
+        Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+    Log.W("..., ", NewLine=False)
+    for Entry in FeatureTensorBack:
+        Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+    Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
+
+def DataExtraction_Two(Log, Data):
+    Log.W("Extracted data:\nIndex Name                                               Label                Index Tensor")
+    for Index in range(len(Data["Names"])):
+        Log.W(f"{Index:>5} ", NewLine=False)
+        Log.W(f"{Data["Names"][Index]:<50} ", NewLine=False)
+        Log.W(f"{Data["Labels"][Index]:<20} ", NewLine=False)
+        Log.W(f"{Data["Indices"][Index]:<5} ", NewLine=False)
+        FeatureTensorFront = Data["Features"][Index][:5]
+        FeatureTensorBack  = Data["Features"][Index][-5:-1]
+        Log.W("[ ", NewLine=False)
+        for Entry in FeatureTensorFront:
+            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+        Log.W("..., ", NewLine=False)
+        for Entry in FeatureTensorBack:
+            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+        Log.W(f"{round(Data["Features"][Index][-1].item(), 3):>6} ]")

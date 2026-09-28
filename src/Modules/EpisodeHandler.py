@@ -21,12 +21,13 @@ class EpisodeLoader():
         self.Initialize()
 
     def Initialize(self):
-        self.EpisodicClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
+        self.CombinedClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
 
     def GenerateLabelMap(self, OutputPath) -> None:
         self.LabelMap = {}
-        for Index, Class in enumerate(self.EpisodicClasses):
+        for Index, Class in enumerate(self.CombinedClasses):
             self.LabelMap[Class] = Index
+        self.LookUpTable = {v:k for k,v in self.LabelMap.items()}
         with open(f"{OutputPath}/Labelmap.json", "w") as f:
             json.dump(self.LabelMap, f)
 
@@ -42,7 +43,7 @@ class EpisodeLoader():
         if not self.Images:
             raise Exception("No data set available. Load data set before creating episodes.")
 
-        SelectedClasses = random.sample(self.EpisodicClasses, self.NumberOfClassesPerEpisode)
+        SelectedClasses = random.sample(self.CombinedClasses, self.NumberOfClassesPerEpisode)
         Episode = {}
         SupportTensors    = []
         QueryTensors      = []
@@ -81,8 +82,8 @@ class EpisodeLoader():
 
         return Episode
 
-    def GetEpisodicparameter(self, EpisodicClass, Mode):
-        MaximumAvailableSamples = len(self.Images[EpisodicClass.split("_")[0]][EpisodicClass.split("_")[1]][Mode]["Names"])
+    def GetEpisodicparameter(self, CombinedClass, Mode):
+        MaximumAvailableSamples = len(self.Images[CombinedClass.split("_")[0]][CombinedClass.split("_")[1]][Mode]["Names"])
 
         # Calculate the continuous solution
         AvailableSamples = int(0.75 * MaximumAvailableSamples)

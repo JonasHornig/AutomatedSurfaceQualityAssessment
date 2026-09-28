@@ -11,6 +11,7 @@ import Modules.DataSetHandling as DATA
 import Modules.NeuralNetwork as NN
 import Modules.Logging as LOG
 import Modules.EpisodeHandler as EPH
+import Modules.NetworkValidation as VAL
 
 import PreprocessImages as PPI
 
@@ -18,14 +19,14 @@ import PreprocessImages as PPI
 class ControlVariables:
     # Inputs
     Modes      : tuple = ("Training", "Testing")
-    DataSet    : str   = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
+    DataSet    : str   = "DummyDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
 
     FeatureDimension     : int   = 768
     EmbeddingDimension   : int   = 5
     NumberOfHiddenLayers : int   = 4
     Gamma                : float = 0.75
 
-    NumberOfEpisodes               : int   = 50
+    NumberOfEpisodes               : int   = 15
     LearningRate                   : float = 1e-4
     NumberOfClassesPerEpisode      : int   = 5     # N_C =< K
     NumberOfSupportSamplesPerClass : int   = 9     # N_S
@@ -47,7 +48,7 @@ def Main():
     Controls  = ControlVariables()
     print("")
     LogFile = LOG.NoteFile(f"{Controls.OutputPath}/Training.log")
-    LogFile.W("\n**************************\n*  Training a Proto Net  *\n**************************")
+    LogFile.W("\n****************************\n*  Training the Proto Net  *\n****************************")
     DataSet = DATA.DataSet()
     DataSet.LoadDataSet(LogFile, Controls)
 
@@ -85,16 +86,17 @@ def Main():
         Optimizer.step()
 
     print(f"Final validation Accuracy: {round(100*LossInfo["ValidationAccuracy"],3)} %")
-
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
 
-    LogFile.W(f"\nTraining complete")
+    ValidationHandler = VAL.ValidationHandler(DataSet, DataSet.GetParameters(), EpisodeLoader, ProtoNet)
+    VAL.NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler)
+
     Duration = time.time() - StartTime
     Hours = int(Duration // 3600)
     Minutes = int((Duration % 3600) // 60)
     Seconds = int(Duration % 60)
     print(f"\nRuntime: {Hours:02d}:{Minutes:02d}:{Seconds:02d}")
-    LogFile.W(f"Runtime: {Hours:02d}:{Minutes:02d}:{Seconds:02d}", NewLine=False)
+    LogFile.W(f"\nRuntime: {Hours:02d}:{Minutes:02d}:{Seconds:02d}", NewLine=False)
     LogFile.Close()
 
 
