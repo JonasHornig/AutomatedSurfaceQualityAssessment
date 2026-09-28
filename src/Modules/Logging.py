@@ -82,15 +82,15 @@ def GenerateEncoder(Log, FeatureDimension, EmbeddingDimension, NumberOfHiddenLay
 
 def Training(Controls, EpisodeLoader, Log):
     Log.W("\nStart main training loop\n==========================")
-    Log.W("*-------------------------------------------------------------------------*")
-    Log.W("| Parameter                           | Variable | Value   | Value        |")
-    Log.W("|                                     |          | (Input) | (Calculated) |")
-    Log.W("|-------------------------------------|----------|---------|--------------|")
-    Log.W(f"| Number of Episodes                  |          | {Controls.NumberOfEpisodes:<4}    |              |")
-    Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<4}    | {EpisodeLoader.NumberOfClassesPerEpisode:<4}         |")
-    Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<4}    | {EpisodeLoader.NumberOfSupportSamplesPerClass:<4}         |")
-    Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<4}    | {EpisodeLoader.NumberOfQuerySamplesPerClass:<4}         |")
-    Log.W("*-------------------------------------------------------------------------*")
+    Log.W("*----------------------------------------------------------*")
+    Log.W("| Parameter                           | Variable | Value   |")
+    Log.W("|                                     |          | (Input) |")
+    Log.W("|-------------------------------------|----------|---------|")
+    Log.W(f"| Number of Episodes                  |          | {Controls.NumberOfEpisodes:<4}    |")
+    Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<4}    |")
+    Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<4}    |")
+    Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<4}    |")
+    Log.W("*----------------------------------------------------------*")
 
 def WritelabelMap(Log, LabelMap):
     Log.W("\n*------------------------------*")
@@ -147,7 +147,7 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
 
     # Y-Axis 2 (Accuracy)
     AccuracyAxis.set_ylabel("Accuracy [%]")
-    AccuracyAxis.set_ylim(0, 100)
+    AccuracyAxis.set_ylim(0, 101)
     AccuracyAxis.plot(Episodes, [100 * Entry for Entry in RunningValidationAccuracy], color="navy"          , label="Validation Accuracy")
     AccuracyAxis.plot(Episodes, [100 * Entry for Entry in RunningAccuracy]          , color="cornflowerblue", label="Training Accuracy")
     
