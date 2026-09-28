@@ -100,7 +100,7 @@ class ProtoNet():
         LOG.GenerateEncoder(Log, self.FeatureDimension, self.EmbeddingDimension, self.NumberOfHiddenLayers, self.Gamma, Indices, Dimensions)
         return nn.Sequential(*MlpLayers)
     
-    def CalculateLoss(self, sample, randomize=False):
+    def CalculateLoss(self, sample):
         PreprocessedSupportTensor = Variable(sample["SupportTensor"])   # S_k
         PreprocessedQueryTensor = Variable(sample["QueryTensor"])       # Q_k
         PreprocessedValidateTensor = Variable(sample["ValidationTensor"])
@@ -109,12 +109,6 @@ class ProtoNet():
         NumberOfSupportSamples = PreprocessedSupportTensor.size(1)   # N_S
         NumberOfQuerySamples = PreprocessedQueryTensor.size(1)       # N_Q
         NumberOfValidateSamples = PreprocessedValidateTensor.size(1)
-
-        if randomize:
-            PreprocessedSupportQueryTensor = torch.cat((PreprocessedSupportTensor, PreprocessedQueryTensor), dim=1)
-            Permutation = torch.randperm(NumberOfSupportSamples + NumberOfQuerySamples)
-            PreprocessedSupportTensor = PreprocessedSupportQueryTensor[:, Permutation[:NumberOfSupportSamples], :]
-            PreprocessedQueryTensor = PreprocessedSupportQueryTensor[:, Permutation[NumberOfSupportSamples:], :]
 
         TargetIndices = torch.arange(0, NumberOfClasses).view(NumberOfClasses, 1, 1).expand(NumberOfClasses,NumberOfQuerySamples,1).long()
         # Dim: NumberOfClasses, NumberOfQuerySamples, 1
@@ -134,16 +128,12 @@ class ProtoNet():
         #Connect to NumberOfClasses * NumberOfSupportSamples + NumberOfClasses * NumberOfSupportSamples, 768
         InputTensor = torch.cat([ReshapedPreprocessedSupportTensor, ReshapedPreprocessedQueryTensor], 0)
 
-        OutputTensor     = self.Encoder.forward( InputTensor                        )
-        ValidationOutput = self.Encoder.forward( ReshapedPreprocessedValidateTensor )
+        self.OutputTensor     = self.Encoder.forward( InputTensor                        )
+        self.ValidationOutput = self.Encoder.forward( ReshapedPreprocessedValidateTensor )
 
-        OutputDimensions = OutputTensor.size(-1)
-        QueryEmbeddings = OutputTensor[NumberOfClasses * NumberOfSupportSamples:]
-        Prototype = OutputTensor[:NumberOfClasses * NumberOfSupportSamples].view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
-
-        DistanceMatrix    = EuclideanDistance(QueryEmbeddings, Prototype)
-        ProbabilityMatrix = F.log_softmax(-DistanceMatrix, dim=1).view(NumberOfClasses, NumberOfQuerySamples, -1)
-        Loss              = -ProbabilityMatrix.gather(2, TargetIndices).squeeze().view(-1).mean()                 # J
+        OutputDimensions = self.OutputTensor.size(-1)
+        QueryEmbeddings = self.OutputTensor[NumberOfClasses * NumberOfSupportSamples:]
+        self.Prototype = self.OutputTensor[:NumberOfClasses * NumberOfSupportSamples].view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
 
         '''
         log_softmax = (z_i) = log(e^(z_i)/sum(e^(z_j))) = z_i - log(sum(e^(z_j)))
@@ -152,16 +142,16 @@ class ProtoNet():
         log_softmax( -d_(ik) ) = -d_(ik) - log(sum^(N_C)_(k'=1)(e^(-d_(ik'))))
         '''
 
+        DistanceMatrix    = EuclideanDistance(QueryEmbeddings, self.Prototype)
+        ProbabilityMatrix = F.log_softmax(-DistanceMatrix, dim=1).view(NumberOfClasses, NumberOfQuerySamples, -1)
+        Loss              = -ProbabilityMatrix.gather(2, TargetIndices).squeeze().view(-1).mean()                 # J
+
         _, ResultLabel = ProbabilityMatrix.max(2)
         Accuracy       = torch.eq(ResultLabel.squeeze(), TargetIndices.squeeze()).float().mean()
 
-        ValidationDistanceMatrix = EuclideanDistance(ValidationOutput, Prototype)
+        ValidationDistanceMatrix = EuclideanDistance(self.ValidationOutput, self.Prototype)
         _, ValidationResultLabel = ValidationDistanceMatrix.min(1)
         ValidationAccuracy       = torch.eq(ValidationResultLabel.squeeze(), TargetValidationIndices.squeeze()).float().mean()
-
-        self.Prototype        = Prototype
-        self.ValidationOutput = ValidationOutput
-        self.OutputTensor     = OutputTensor
 
         return Loss, {
             "Loss": Loss.item(),
