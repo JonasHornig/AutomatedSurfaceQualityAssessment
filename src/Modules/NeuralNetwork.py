@@ -23,7 +23,7 @@ class DINOv2Model():
         assert isinstance(self.Model, nn.Module)
         self.Model.eval()
 
-    def ApplyNetwork(self, Images, Log, ProgressBar = None, DetailedLog = False):
+    def ApplyNetwork(self, Images, Log, ProgressBar=None, DetailedLog=False):
         """
         Expects data as python dictionary (Images)
         Images["Images"] - list of images
@@ -78,7 +78,7 @@ class ProtoNet():
         for Line in str(self.Encoder).split("\n"):
             Log.W(f"{Line}")
 
-        self.Prototype = None
+        self.Prototypes = None
 
     def GetMlpEncoder(self, Log):
         @staticmethod
@@ -133,7 +133,7 @@ class ProtoNet():
 
         OutputDimensions = self.OutputTensor.size(-1)
         QueryEmbeddings = self.OutputTensor[NumberOfClasses * NumberOfSupportSamples:]
-        self.Prototype = self.OutputTensor[:NumberOfClasses * NumberOfSupportSamples].view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
+        self.Prototypes = self.OutputTensor[:NumberOfClasses * NumberOfSupportSamples].view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
 
         '''
         log_softmax = (z_i) = log(e^(z_i)/sum(e^(z_j))) = z_i - log(sum(e^(z_j)))
@@ -142,14 +142,14 @@ class ProtoNet():
         log_softmax( -d_(ik) ) = -d_(ik) - log(sum^(N_C)_(k'=1)(e^(-d_(ik'))))
         '''
 
-        DistanceMatrix    = EuclideanDistance(QueryEmbeddings, self.Prototype)
+        DistanceMatrix    = EuclideanDistance(QueryEmbeddings, self.Prototypes)
         ProbabilityMatrix = F.log_softmax(-DistanceMatrix, dim=1).view(NumberOfClasses, NumberOfQuerySamples, -1)
         Loss              = -ProbabilityMatrix.gather(2, TargetIndices).squeeze().view(-1).mean()                 # J
 
         _, ResultLabel = ProbabilityMatrix.max(2)
         Accuracy       = torch.eq(ResultLabel.squeeze(), TargetIndices.squeeze()).float().mean()
 
-        ValidationDistanceMatrix = EuclideanDistance(self.ValidationOutput, self.Prototype)
+        ValidationDistanceMatrix = EuclideanDistance(self.ValidationOutput, self.Prototypes)
         _, ValidationResultLabel = ValidationDistanceMatrix.min(1)
         ValidationAccuracy       = torch.eq(ValidationResultLabel.squeeze(), TargetValidationIndices.squeeze()).float().mean()
 
@@ -158,6 +158,124 @@ class ProtoNet():
             "Accuracy": Accuracy.item(),
             "ValidationAccuracy": ValidationAccuracy.item()}
 
+    def ApplyNetwork(self):
+        return
+
+'''
+class CompleteNetwork:
+    def __init__(self, Settings):
+        self.Settings = Settings
+
+        self.LabelMap    = GLM.GetLabelMap()
+        self.LookUpTable = {self.LabelMap[Class]: Class for Class in self.LabelMap.keys()}
+
+        self.Transform       = self.GenerateTensor()
+        self.PretrainedNet   = self.GetDINOv2()
+        self.TrainedProtoNet = self.GetProtoNet()
+
+    @staticmethod
+    def GetDINOv2():
+        Preprocessor = transforms.Compose([
+            transforms.CenterCrop( 224                                                  ) ,
+            transforms.Resize(     256, interpolation=InterpolationMode.BILINEAR        ) ,
+            transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ])
+
+        Features = torch.hub.load('facebookresearch/dino:main', 'dino_vitb16')
+        return [Features.eval(), Preprocessor]
+
+    def GetProtoNet(self):
+        if isinstance(self.Settings.NetworkPath, str):
+            TrainedProtoNet = self.CreateLinearNet()
+            TrainedProtoNet.load_state_dict(torch.load(self.Settings.NetworkPath + "/TrainedProtoNet.pth", weights_only=True))
+            self.PrototypeEmbedding = torch.load(self.Settings.NetworkPath + "/PrototypeEmbedding.pth", weights_only=True)
+        else:
+            print("Can't load a network. See NeuralNetworkClassification.py - class LoadCompleteNetwork - GetProtoNet()")
+            raise SystemExit()
+        return TrainedProtoNet.eval()
+
+    def CreateLinearNet(self):
+        class Protonet(nn.Module):
+            def __init__(self, encoder):
+                super(Protonet, self).__init__()
+                self.encoder = encoder
+
+        if self.Settings.NumberOfLayers < 2:
+            print("Setting number of layers to 2.")
+            self.Settings.NumberOfLayers = 2
+
+        def CreateLinearNetworkBlock(InputShape, OutputShape, LocalDropOutRate=0):
+            LinearBlock = [
+                nn.Linear(InputShape, OutputShape),
+                nn.BatchNorm1d(OutputShape),
+                nn.LeakyReLU()]
+            if LocalDropOutRate > 0:
+                LinearBlock.append(nn.Dropout(p=LocalDropOutRate))
+            return nn.Sequential(*LinearBlock)
+
+        ProgressionFactor = int(np.exp(np.log(self.Settings.PretrainedOutputDimension) / self.Settings.NumberOfLayers))
+        ActiveLayerWidth = ProgressionFactor ** (self.Settings.NumberOfLayers - 1)
+        Layers = [CreateLinearNetworkBlock(self.Settings.PretrainedOutputDimension, ActiveLayerWidth, self.Settings.DropOutRate)]
+        for _ in range(self.Settings.NumberOfLayers - 2):
+            NextLayerWidth = int(ActiveLayerWidth / ProgressionFactor)
+            Layers.append(CreateLinearNetworkBlock(ActiveLayerWidth, NextLayerWidth, self.Settings.DropOutRate))
+            ActiveLayerWidth = NextLayerWidth
+
+        Layers.append(CreateLinearNetworkBlock(ActiveLayerWidth, self.Settings.EmbeddingDimensions))
+        encoder = nn.Sequential(*Layers)
+
+        if len(Layers) != self.Settings.NumberOfLayers:
+            print(f"ERROR! {len(Layers)} created but {self.Settings.NumberOfLayers} layers requested")
+            raise SystemExit
+        return Protonet(encoder)
+
+    def ApplyNetwork(self, Images):
+        TensorsToStack = []
+        for Image in Images:
+            Image.ImageTensor = self.Transform(Image.PILImage)
+            TensorsToStack.append(Image.ImageTensor)
+        StackedTensors = torch.stack(TensorsToStack)
+
+        with torch.no_grad():
+            Preprocessed       = self.PretrainedNet[1](StackedTensors)
+            PreprocessedTensor = self.PretrainedNet[0](Preprocessed)
+            EmbeddedImage      = self.TrainedProtoNet.encoder.forward(PreprocessedTensor)
+            DistanceMatrix     = EuclideanDistance(EmbeddedImage, self.PrototypeEmbedding)
+            ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
+
+        Matrices        = {"DistanceMatrix" : DistanceMatrix        , "ProbabilityMatrix" : ProbabilityMatrix        }
+        Classifications = {"DistanceBased"  : DistanceMatrix.min(1) , "ProbabilityBased"  : ProbabilityMatrix.max(1) }
+
+        if len(Images) != Classifications["DistanceBased"][0].shape[0]:
+            print("Images got lost in network application")
+            print(f"Number of Image tensors: {Classifications["DistanceBased"][0].shape[0]}")
+            print(f"Number of loaded images : {len(Images)}")
+            raise SystemExit()
+
+        for Index, Image in enumerate(Images):
+            if not torch.equal(StackedTensors[Index], Image.ImageTensor):
+                print("Error! Image indexing inconsistent - See Network application")
+                print(f"Occurred for Index {Index}")
+                raise SystemExit()
+            if Classifications["DistanceBased"][1][Index].item() == Classifications["ProbabilityBased"][1][Index].item():
+                Image.CoherentClassification = True
+
+            ClassificationID        = Classifications["DistanceBased"][1][Index].item()
+            Image.NNClassification  = [ClassificationID, self.LookUpTable[ClassificationID]]
+            Image.LookUpTable       = self.LookUpTable
+            Image.Distances         = Matrices["DistanceMatrix"][Index]
+            Image.Probabilities     = Matrices["ProbabilityMatrix"][Index]
+            Image.PreprocessedImage = PreprocessedTensor[Index]
+            Image.EmbeddedImage     = EmbeddedImage[Index]
+
+            if Image.Probabilities.max(0)[0].item() < 0.9:
+                Image.UnsureClassification = True
+
+    @staticmethod
+    def GenerateTensor():
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor()])
+'''
 
 def ComputeBatchSize(NumberOfImages: int, MaxBatchSize: int) -> tuple[int, int]:
     """

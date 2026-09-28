@@ -3,6 +3,9 @@ import h5py
 import numpy as np
 import torch
 
+import numpy as np
+import matplotlib.pyplot as plt
+
 class NoteFile():
     def __init__(self, FilePath: str):
         self.FilePath = FilePath
@@ -79,15 +82,15 @@ def GenerateEncoder(Log, FeatureDimension, EmbeddingDimension, NumberOfHiddenLay
 
 def Training(Controls, EpisodeLoader, Log):
     Log.W("\nStart main training loop\n==========================")
-    Log.W("*-------------------------------------------------------------------------*")
-    Log.W("| Parameter                           | Variable | Value   | Value        |")
-    Log.W("|                                     |          | (Input) | (Calculated) |")
-    Log.W("|-------------------------------------|----------|---------|--------------|")
-    Log.W(f"| Number of Episodes                  |          | {Controls.NumberOfEpisodes:<4}    |              |")
-    Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<4}    | {EpisodeLoader.NumberOfClassesPerEpisode:<4}         |")
-    Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<4}    | {EpisodeLoader.NumberOfSupportSamplesPerClass:<4}         |")
-    Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<4}    | {EpisodeLoader.NumberOfQuerySamplesPerClass:<4}         |")
-    Log.W("*-------------------------------------------------------------------------*")
+    Log.W("*----------------------------------------------------------*")
+    Log.W("| Parameter                           | Variable | Value   |")
+    Log.W("|                                     |          | (Input) |")
+    Log.W("|-------------------------------------|----------|---------|")
+    Log.W(f"| Number of Episodes                  |          | {Controls.NumberOfEpisodes:<4}    |")
+    Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<4}    |")
+    Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<4}    |")
+    Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<4}    |")
+    Log.W("*----------------------------------------------------------*")
 
 def WritelabelMap(Log, LabelMap):
     Log.W("\n*------------------------------*")
@@ -108,19 +111,86 @@ def TrainingEpisode(Log, Controls, SelectedClasses, SupportIndices, QueryIndices
     Log.W(f"  Query tensor     : [{Episode["QueryTensor"].size(0):>3}, {Episode["QueryTensor"].size(1):>3}, {Episode["QueryTensor"].size(2):>4}]")
     Log.W(f"  Validation tensor: [{Episode["ValidationTensor"].size(0):>3}, {Episode["ValidationTensor"].size(1):>3}, {Episode["ValidationTensor"].size(2):>4}]")
 
-def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy):
-    Log.W("\nResults of the training process:")
-    Log.W("----------------------------------")
+def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy):
+    NumberOfEpisodes = len(RunningAccuracy)
+    Episodes = [Episode for Episode in range(NumberOfEpisodes)]
 
-    Log.W("*--------------------------------*")
-    Log.W("| Episode | Loss    | Validation |")
-    Log.W("| Index   |         | Accuracy   |")
-    Log.W("|---------|---------|------------|")
-    for Index, _ in enumerate(RunningAccuracy):
-        Log.W(f"| {Index+1:<7} | {round(RunningLoss[Index],5):<7} | {round(100*RunningAccuracy[Index],7):<10} |")
-    Log.W("*--------------------------------*")
+    Log.W("\n*---------------------------------------------*")
+    Log.W("| Episode | Loss    | Accuracy   | Validation |")
+    Log.W("|         |         |            | Accuracy   |")
+    Log.W("|---------|---------|------------|------------|")
+    for Index in range(NumberOfEpisodes):
+        Log.W(f"| {Index+1:<7} | {round(RunningLoss[Index],5):<7} | {round(100*RunningAccuracy[Index],7):<10} | {round(100*RunningValidationAccuracy[Index],7):<10} |")
+    Log.W("*---------------------------------------------*")
+    StandardDeviationCutOff = int(NumberOfEpisodes/10)
+    if StandardDeviationCutOff > 0:
+        LossStandardDeviation   = np.std(RunningLoss[-StandardDeviationCutOff:])
+        ValAccStandardDeviation = np.std([100*Entry for Entry in RunningValidationAccuracy[-StandardDeviationCutOff:]])
+        Log.W(f"Standard deviation during the last 10% of training episodes")
+        Log.W(f"Loss               : {round(LossStandardDeviation,3)}")
+        Log.W(f"Validation Accuracy: {round(ValAccStandardDeviation,3)} %")
 
     with open(f"{Controls.OutputPath}TrainingProcess.csv", "w") as TrainingProcessCsv:
         TrainingProcessCsv.write("Episode Index,         Loss, Validation Accuracy\n")
         for Index, _ in enumerate(RunningAccuracy):
             TrainingProcessCsv.write(f"{Index+1:>13}, {round(RunningLoss[Index],10):12.8f}, {round(100*RunningAccuracy[Index],17):19.15f}\n")
+
+    # Define plot
+    Figure, LossAxis = plt.subplots(figsize=(12,5))
+    AccuracyAxis = LossAxis.twinx()
+    plt.title(f"Training info")
+
+    # Set up X-Axis
+    LossAxis.set_xlabel("Episode")
+    plt.xlim(0, NumberOfEpisodes)
+
+    # Y-Axis 1 (Loss)
+    LossAxis.set_ylabel("Loss")
+    LossAxis.set_ylim(0, 1.1 * np.amax(RunningLoss))
+    LossAxis.plot(Episodes, RunningLoss, color="red", label="Loss")
+
+    # Y-Axis 2 (Accuracy)
+    AccuracyAxis.set_ylabel("Accuracy [%]")
+    AccuracyAxis.set_ylim(0, 101)
+    AccuracyAxis.plot(Episodes, [100 * Entry for Entry in RunningValidationAccuracy], color="navy"          , label="Validation Accuracy")
+    AccuracyAxis.plot(Episodes, [100 * Entry for Entry in RunningAccuracy]          , color="cornflowerblue", label="Training Accuracy")
+    
+    Lines1, Labels1 = LossAxis.get_legend_handles_labels()
+    Lines2, Labels2 = AccuracyAxis.get_legend_handles_labels()
+    LossAxis.legend(Lines1 + Lines2, Labels1 + Labels2, loc="upper left")
+    LossAxis.grid(True)
+    plt.tight_layout()
+    LossAxis.ticklabel_format(useOffset=False, style="plain")
+    plt.savefig(f"{Controls.OutputPath}/TrainingInfo.png")
+
+def DataExtraction_One(Log, Name, FeatureTensor, Label, LabelIndex, PositionIndex):
+    Log.W(f"{PositionIndex:>5} ", NewLine=False)
+    Log.W(f"{Name:<50} ", NewLine=False)
+    Log.W(f"{Label:<20} ", NewLine=False)
+    Log.W(f"{LabelIndex:<5} ", NewLine=False)
+    FeatureTensorFront = FeatureTensor[:5]
+    FeatureTensorBack  = FeatureTensor[-5:-1]
+    Log.W("[ ", NewLine=False)
+    for Entry in FeatureTensorFront:
+        Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+    Log.W("..., ", NewLine=False)
+    for Entry in FeatureTensorBack:
+        Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+    Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
+
+def DataExtraction_Two(Log, Data):
+    Log.W("Extracted data:\nIndex Name                                               Label                Index Tensor")
+    for Index in range(len(Data["Names"])):
+        Log.W(f"{Index:>5} ", NewLine=False)
+        Log.W(f"{Data["Names"][Index]:<50} ", NewLine=False)
+        Log.W(f"{Data["Labels"][Index]:<20} ", NewLine=False)
+        Log.W(f"{Data["Indices"][Index]:<5} ", NewLine=False)
+        FeatureTensorFront = Data["Features"][Index][:5]
+        FeatureTensorBack  = Data["Features"][Index][-5:-1]
+        Log.W("[ ", NewLine=False)
+        for Entry in FeatureTensorFront:
+            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+        Log.W("..., ", NewLine=False)
+        for Entry in FeatureTensorBack:
+            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+        Log.W(f"{round(Data["Features"][Index][-1].item(), 3):>6} ]")
