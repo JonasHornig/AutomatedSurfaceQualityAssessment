@@ -2,6 +2,7 @@ import time
 StartTime = time.time()
 
 import torch
+import os
 
 from tqdm import tqdm
 from dataclasses import dataclass, field
@@ -18,7 +19,6 @@ class ControlVariables:
     # Inputs
     Modes      : tuple = ("Training", "Testing")
     DataSet    : str   = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
-    OutputPath : str   = "Outputs/"
 
     FeatureDimension     : int   = 768
     EmbeddingDimension   : int   = 5
@@ -39,11 +39,15 @@ class ControlVariables:
     NumberOfClasses : int = 0 # K
     
     def __post_init__(self):
-        self.DataSetPath = f"DataSets/{self.DataSet}"
+        BaseDirectory = os.path.dirname(os.path.abspath(__file__))
+        self.DataSetPath = f"{BaseDirectory}/DataSets/{self.DataSet}"
+        self.OutputPath : str   = f"{BaseDirectory}/Outputs/"
 
-def Main(LogFile):
-    LogFile.W("\n**************************\n*  Training a Proto Net  *\n**************************")
+def Main():
     Controls  = ControlVariables()
+    print("")
+    LogFile = LOG.NoteFile(f"{Controls.OutputPath}/Training.log")
+    LogFile.W("\n**************************\n*  Training a Proto Net  *\n**************************")
     DataSet = DATA.DataSet()
     DataSet.LoadDataSet(LogFile, Controls)
 
@@ -56,9 +60,9 @@ def Main(LogFile):
     Optimizer.zero_grad()
     Scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(Optimizer, T_max=Controls.NumberOfEpisodes)
 
-    EpisodeLoader = EPH.EpisodeLoader(DataSet.Images, DataSet.GetParameters())
+    EpisodeLoader = EPH.EpisodeLoader(DataSet.Images, DataSet.GetParameters(), Controls)
     LOG.Training(Controls, EpisodeLoader, LogFile)
-    EpisodeLoader.GenerateLabelMap()
+    EpisodeLoader.GenerateLabelMap(Controls.OutputPath)
     LOG.WritelabelMap(LogFile, EpisodeLoader.LabelMap)
 
     RunningLoss     = []
@@ -78,11 +82,6 @@ def Main(LogFile):
 
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy)
 
-if __name__ == "__main__":
-    print("")
-    LogFile = LOG.NoteFile(f"Outputs/Training.log")
-    Main(LogFile)
-
     LogFile.W(f"\nTraining complete")
     Duration = time.time() - StartTime
     Hours = int(Duration // 3600)
@@ -91,3 +90,7 @@ if __name__ == "__main__":
     print(f"\nRuntime: {Hours:02d}:{Minutes:02d}:{Seconds:02d}")
     LogFile.W(f"Runtime: {Hours:02d}:{Minutes:02d}:{Seconds:02d}", NewLine=False)
     LogFile.Close()
+
+
+if __name__ == "__main__":
+    Main()

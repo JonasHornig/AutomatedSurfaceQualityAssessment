@@ -3,7 +3,7 @@ import random
 import string
 import shutil
 
-import Code.AuxiallryCode as AUX
+import Modules.AuxiallryCode as AUX
 
 OldDataSetPath = "DataSets/SmallDataSet_Old"
 NewDataSetPath = "DataSets/SmallDataSet"

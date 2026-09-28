@@ -10,9 +10,9 @@ from PIL import Image
 from tqdm import tqdm
 from torchvision.transforms import InterpolationMode
 
-import Code.DataSetHandling as DATA
-import Code.NeuralNetwork as NN
-import Code.Logging as LOG
+import Modules.DataSetHandling as DATA
+import Modules.NeuralNetwork as NN
+import Modules.Logging as LOG
 
 @dataclass
 class ControlVariables:

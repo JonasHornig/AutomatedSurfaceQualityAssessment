@@ -218,6 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Manual edits
-src/DataSets/CompleteDataSet/Images
-src/DataSets/DummyDataSet/Images
-src/DataSets/SmallDataSet/Images
+src/DataSets/CompleteDataSet/Images/
+src/DataSets/DummyDataSet/Images/
+src/DataSets/SmallDataSet/Images/
+src/Outputs/
