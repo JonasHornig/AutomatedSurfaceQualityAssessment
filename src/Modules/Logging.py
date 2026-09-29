@@ -178,19 +178,24 @@ def DataExtraction_One(Log, Name, FeatureTensor, Label, LabelIndex, PositionInde
         Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
     Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
 
-def DataExtraction_Two(Log, Data):
+def DataExtraction_Two(Log, PreparedData, Samples, Classes):
+    Log.W(f"\nFinished Tensor of shape [{PreparedData["FeatureTensor"].shape[0]}, {PreparedData["FeatureTensor"].shape[1]}, {PreparedData["FeatureTensor"].shape[2]}]")
     Log.W("Extracted data:\nIndex Name                                               Label                Index Tensor")
-    for Index in range(len(Data["Names"])):
-        Log.W(f"{Index:>5} ", NewLine=False)
-        Log.W(f"{Data["Names"][Index]:<50} ", NewLine=False)
-        Log.W(f"{Data["Labels"][Index]:<20} ", NewLine=False)
-        Log.W(f"{Data["Indices"][Index]:<5} ", NewLine=False)
-        FeatureTensorFront = Data["Features"][Index][:5]
-        FeatureTensorBack  = Data["Features"][Index][-5:-1]
-        Log.W("[ ", NewLine=False)
-        for Entry in FeatureTensorFront:
-            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-        Log.W("..., ", NewLine=False)
-        for Entry in FeatureTensorBack:
-            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-        Log.W(f"{round(Data["Features"][Index][-1].item(), 3):>6} ]")
+    RunningIndex = 0
+    for ClassIndex in range(PreparedData["FeatureTensor"].shape[0]):
+        for EntryIndex in range(PreparedData["FeatureTensor"].shape[1]):
+            Log.W(f"{RunningIndex:>5} ", NewLine=False)
+            Log.W(f"{PreparedData["Names"][RunningIndex]:<50} ", NewLine=False)
+            Log.W(f"{PreparedData["Labels"][RunningIndex]:<20} ", NewLine=False)
+            Log.W(f"{PreparedData["Indices"][RunningIndex]:<5} ", NewLine=False)
+            FeatureTensor = PreparedData["FeatureTensor"][ClassIndex][EntryIndex]
+            FeatureTensorFront = FeatureTensor[:5]
+            FeatureTensorBack  = FeatureTensor[-5:-1]
+            Log.W("[ ", NewLine=False)
+            for Entry in FeatureTensorFront:
+                Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+            Log.W("..., ", NewLine=False)
+            for Entry in FeatureTensorBack:
+                Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+            Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
+            RunningIndex += 1

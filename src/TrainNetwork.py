@@ -34,7 +34,7 @@ class ControlVariables:
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo : bool = False
+    WriteDetailedDebugInfo : bool = True
     
     # Parameter initialisation
     NumberOfClasses : int = 0 # K

@@ -12,30 +12,45 @@ class ValidationHandler():
         self.LabelMap    : dict      = EpisodeLoader.LabelMap
         self.LookUpTable : dict      = EpisodeLoader.LookUpTable
 
+        self.DataPrepared : bool = False
+
         self.PostInit()
 
     def PostInit(self):
         self.CombinedClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
 
     def ExtractData(self, LogFile, Controls, Mode="Testing"):
-        self.PreparedData = {"Features": [], "Names": [], "Labels": [], "Indices": []}
+        # Generate training tensors with the shape [NC, NS, DINOv2 Feature dimension]
+        self.PreparedData = {"Names": [], "Labels": [], "Indices": [], "FeatureTensor": torch.empty((1, 1), dtype=torch.float32)}
         if Controls.WriteDetailedDebugInfo:
             LogFile.W("\nExtracting data from Data set for the test application")
             LogFile.W("Read data:\nIndex Name                                               Label                Index Tensor")
         RunningIndex = 0
+        ClassTensors = []
         for Sample in self.Samples:
             for Class in self.Classes:
-                Label = f"{Sample}_{Class}"
+                Label      = f"{Sample}_{Class}"
+                LabelIndex = self.LabelMap[Label]
+                Features = []
                 for Index in range(self.Images[Sample][Class]["Testing"]["DinoFeatures"].shape[0]):
-                    self.PreparedData["Features"].append(self.Images[Sample][Class]["Testing"]["DinoFeatures"][Index])
-                    self.PreparedData["Names"].append(self.Images[Sample][Class]["Testing"]["Names"][Index])
+                    ActiveFeatureTensor = self.Images[Sample][Class]["Testing"]["DinoFeatures"][Index]
+                    ActiveName = self.Images[Sample][Class]["Testing"]["Names"][Index]
+
+                    Features.append(ActiveFeatureTensor)
+                    self.PreparedData["Names"].append(ActiveName)
                     self.PreparedData["Labels"].append(Label)
-                    self.PreparedData["Indices"].append(self.LabelMap[Label])
+                    self.PreparedData["Indices"].append(LabelIndex)
+
                     if Controls.WriteDetailedDebugInfo:
-                        LOG.DataExtraction_One(LogFile, self.Images[Sample][Class]["Testing"]["Names"][Index], self.Images[Sample][Class]["Testing"]["DinoFeatures"][Index], Label, self.LabelMap[Label], RunningIndex)
+                        LOG.DataExtraction_One(LogFile, ActiveName, ActiveFeatureTensor,Label, LabelIndex, RunningIndex)
                     RunningIndex += 1
+                ClassTensors.append(torch.stack(Features))
+
+        self.PreparedData["FeatureTensor"] = torch.stack(ClassTensors)
         if Controls.WriteDetailedDebugInfo:
-            LOG.DataExtraction_Two(LogFile, self.PreparedData)
+            #LOG.DataExtraction_Two(LogFile, self.PreparedData)
+            LOG.DataExtraction_Two(LogFile, self.PreparedData, self.Samples, self.Classes)
+        self.DataPrepared = True
 
 def NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler):
     LogFile.W("\n******************************\n*  Validating the Proto Net  *\n******************************")
