@@ -48,7 +48,6 @@ class ValidationHandler():
 
         self.PreparedData["FeatureTensor"] = torch.stack(ClassTensors)
         if Controls.WriteDetailedDebugInfo:
-            #LOG.DataExtraction_Two(LogFile, self.PreparedData)
             LOG.DataExtraction_Two(LogFile, self.PreparedData, self.Samples, self.Classes)
         self.DataPrepared = True
 
@@ -59,6 +58,11 @@ def NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler):
 
 def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ValidationHandler.ExtractData(LogFile, Controls, "Testing")
+    Embeddings         = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(6 * 10, 768))
+    DistanceMatrix     = NN.EuclideanDistance(Embeddings, Network.Prototypes)
+    ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
+
+    breakpoint()
 
     '''
     TensorsToStack = []

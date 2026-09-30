@@ -28,7 +28,7 @@ class ControlVariables:
 
     NumberOfEpisodes               : int   = 15
     LearningRate                   : float = 1e-4
-    NumberOfClassesPerEpisode      : int   = 5     # N_C =< K
+    NumberOfClassesPerEpisode      : int   = 6     # N_C =< K
     NumberOfSupportSamplesPerClass : int   = 9     # N_S
     NumberOfQuerySamplesPerClass   : int   = 1     # N_Q
 
