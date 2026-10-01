@@ -70,9 +70,6 @@ def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ValidationHandler.PreparedData["Classifications"] = [Classification.item() for Classification in DistanceMatrix.min(1)[1]]
 
 
-    #some comment
-
-    breakpoint()
 
     for Index in range(len(ValidationHandler.PreparedData["Names"])):
         print("")
