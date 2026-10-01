@@ -61,8 +61,21 @@ def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     Embeddings         = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(6 * 10, 768))
     DistanceMatrix     = NN.EuclideanDistance(Embeddings, Network.Prototypes)
     ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
-
+    Classifications = {"DistanceBased"  : DistanceMatrix.min(1) , "ProbabilityBased"  : ProbabilityMatrix.max(1) }
     
+    
+    
+    ValidationHandler.PreparedData["Distances"]       = [Distance.item() for Distance in DistanceMatrix.min(1)[0]]
+    ValidationHandler.PreparedData["Probabilities"]   = [Probability.item() for Probability in ProbabilityMatrix.max(1)[0]]
+    ValidationHandler.PreparedData["Classifications"] = [Classification.item() for Classification in DistanceMatrix.min(1)[1]]
+
+
+
+    breakpoint()
+
+    for Index in range(len(ValidationHandler.PreparedData["Names"])):
+        print("")
+
 
     '''
     TensorsToStack = []
