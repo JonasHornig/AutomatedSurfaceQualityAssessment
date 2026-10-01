@@ -62,7 +62,7 @@ def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     DistanceMatrix     = NN.EuclideanDistance(Embeddings, Network.Prototypes)
     ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
 
-    breakpoint()
+    
 
     '''
     TensorsToStack = []
