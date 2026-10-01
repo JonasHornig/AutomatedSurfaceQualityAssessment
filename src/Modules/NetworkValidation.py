@@ -69,7 +69,7 @@ def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ValidationHandler.PreparedData["Probabilities"]   = [Probability.item() for Probability in ProbabilityMatrix.max(1)[0]]
     ValidationHandler.PreparedData["Classifications"] = [Classification.item() for Classification in DistanceMatrix.min(1)[1]]
 
-
+    # some comment
 
     for Index in range(len(ValidationHandler.PreparedData["Names"])):
         print("")
