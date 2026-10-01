@@ -211,3 +211,23 @@ def TestApplicationResults(Log, Data, LookUpTable):
     CorrectClassifications = [A == B for A, B in zip(Data["LabelIndices"], Data["Classifications"])]
     Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
     Log.W(f"Accuracy = {round(Accuracy, 3)}")
+
+def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Name, Title:str = "Principal Component Analysis"):
+    ClassColours = {"18201_Polished": "darkgreen", "18201_Scratched": "brown", "22116_Polished": "greenyellow", "22116_Scratched": "red", "22348_Polished": "springgreen", "22348_Scratched": "darkorange"}
+    plt.figure(figsize=(12, 9))
+    plt.title(Title, fontsize=20)
+    plt.xlabel(f"PC1 ({round(100*(1-ValidationHandler.PreparedData["FeatureInformationLoss"][0]),2)}% of original variance)", fontsize=15)
+    plt.ylabel(f"PC2 ({round(100*(1-ValidationHandler.PreparedData["FeatureInformationLoss"][1]),2)}% of original variance)", fontsize=15)
+    plt.grid(True)
+
+    for Label in np.unique(np.array(ValidationHandler.PreparedData["Labels"])):
+        Mask = np.array(ValidationHandler.PreparedData["Labels"]) == Label
+        plt.scatter(ValidationHandler.PreparedData["TransformedFeatureTensor"][Mask, 0] ,
+                    ValidationHandler.PreparedData["TransformedFeatureTensor"][Mask, 1] ,
+                    c=[ClassColours[Label]]                                             ,
+                    alpha=1                                                             ,
+                    label=Label                                                         )
+
+    plt.legend()
+    plt.legend(prop={"size":15})
+    plt.savefig(f"{Controls.OutputPath}/{Name}.png")

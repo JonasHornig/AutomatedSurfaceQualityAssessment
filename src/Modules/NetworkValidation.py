@@ -1,5 +1,7 @@
 import torch
 
+from sklearn.decomposition import PCA
+
 from . import Logging as LOG
 from . import NeuralNetwork as NN
 
@@ -9,8 +11,9 @@ class ValidationHandler():
         self.Classes     : list[str] = DataSetParameters["Classes"]
         self.Images      : dict      = DataSet.Images
 
-        self.LabelMap    : dict      = EpisodeLoader.LabelMap
-        self.LookUpTable : dict      = EpisodeLoader.LookUpTable
+        self.LabelMap    : dict         = EpisodeLoader.LabelMap
+        self.LookUpTable : dict         = EpisodeLoader.LookUpTable
+        self.Prototypes  : torch.Tensor = Network.Prototypes
 
         self.DataPrepared : bool = False
 
@@ -56,13 +59,14 @@ def NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler):
     LogFile.W("\n******************************\n*  Validating the Proto Net  *\n******************************")
     print("\nValidating the trained network")
     NetworkTestApplication(LogFile, Controls, ProtoNet, ValidationHandler)
+    PrincipalComponentAnalysis(LogFile, Controls,  ValidationHandler)
 
 def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ValidationHandler.ExtractData(LogFile, Controls, "Testing")
-    Embeddings         = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(6 * 10, 768))
-    DistanceMatrix     = NN.EuclideanDistance(Embeddings, Network.Prototypes)
+    ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(6 * 10, 768))
+
+    DistanceMatrix     = NN.EuclideanDistance(ValidationHandler.PreparedData["Embeddings"], Network.Prototypes)
     ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
-    Classifications = {"DistanceBased"  : DistanceMatrix.min(1) , "ProbabilityBased"  : ProbabilityMatrix.max(1) }
 
     ValidationHandler.PreparedData["Distances"]       = []
     ValidationHandler.PreparedData["Probabilities"]   = []
@@ -73,3 +77,14 @@ def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
         ValidationHandler.PreparedData["Classifications"].append(DistanceMatrix.min(1)[1][Index].item())
 
     LOG.TestApplicationResults(LogFile, ValidationHandler.PreparedData, ValidationHandler.LookUpTable)
+
+def PrincipalComponentAnalysis(LogFile, Controls, ValidationHandler, NumberOfComponents:int = 2):
+    Pca = PCA(n_components=NumberOfComponents)
+    ReshapedFeatureTensor = ValidationHandler.PreparedData["FeatureTensor"].reshape(-1, 768).detach().cpu().numpy()
+    Pca.fit(ReshapedFeatureTensor)
+
+    ValidationHandler.PreparedData["TransformedFeatureTensor"] = Pca.transform(ReshapedFeatureTensor)
+    ValidationHandler.PreparedData["FeatureInformationLoss"]   = Pca.explained_variance_ratio_
+    #ValidationHandler.TransformedPrototypes    = Pca.transform(ValidationHandler.Prototypes)
+
+    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, "PCA_DinoFeatures")
