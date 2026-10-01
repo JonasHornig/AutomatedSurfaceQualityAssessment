@@ -21,7 +21,7 @@ class ValidationHandler():
 
     def ExtractData(self, LogFile, Controls, Mode="Testing"):
         # Generate training tensors with the shape [NC, NS, DINOv2 Feature dimension]
-        self.PreparedData = {"Names": [], "Labels": [], "Indices": [], "FeatureTensor": torch.empty((1, 1), dtype=torch.float32)}
+        self.PreparedData = {"MasterIndices": [], "Names": [], "Labels": [], "LabelIndices": [], "FeatureTensor": torch.empty((1, 1), dtype=torch.float32)}
         if Controls.WriteDetailedDebugInfo:
             LogFile.W("\nExtracting data from Data set for the test application")
             LogFile.W("Read data:\nIndex Name                                               Label                Index Tensor")
@@ -37,9 +37,10 @@ class ValidationHandler():
                     ActiveName = self.Images[Sample][Class]["Testing"]["Names"][Index]
 
                     Features.append(ActiveFeatureTensor)
+                    self.PreparedData["MasterIndices"].append(RunningIndex)
                     self.PreparedData["Names"].append(ActiveName)
                     self.PreparedData["Labels"].append(Label)
-                    self.PreparedData["Indices"].append(LabelIndex)
+                    self.PreparedData["LabelIndices"].append(LabelIndex)
 
                     if Controls.WriteDetailedDebugInfo:
                         LOG.DataExtraction_One(LogFile, ActiveName, ActiveFeatureTensor,Label, LabelIndex, RunningIndex)
@@ -62,65 +63,13 @@ def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     DistanceMatrix     = NN.EuclideanDistance(Embeddings, Network.Prototypes)
     ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
     Classifications = {"DistanceBased"  : DistanceMatrix.min(1) , "ProbabilityBased"  : ProbabilityMatrix.max(1) }
-    
-    
-    
-    ValidationHandler.PreparedData["Distances"]       = [Distance.item() for Distance in DistanceMatrix.min(1)[0]]
-    ValidationHandler.PreparedData["Probabilities"]   = [Probability.item() for Probability in ProbabilityMatrix.max(1)[0]]
-    ValidationHandler.PreparedData["Classifications"] = [Classification.item() for Classification in DistanceMatrix.min(1)[1]]
 
-    # some comment
+    ValidationHandler.PreparedData["Distances"]       = []
+    ValidationHandler.PreparedData["Probabilities"]   = []
+    ValidationHandler.PreparedData["Classifications"] = []
+    for Index in ValidationHandler.PreparedData["MasterIndices"]:
+        ValidationHandler.PreparedData["Distances"].append(DistanceMatrix.min(1)[0][Index].item())
+        ValidationHandler.PreparedData["Probabilities"].append(ProbabilityMatrix.max(1)[0][Index].item())
+        ValidationHandler.PreparedData["Classifications"].append(DistanceMatrix.min(1)[1][Index].item())
 
-    for Index in range(len(ValidationHandler.PreparedData["Names"])):
-        print("")
-
-
-    '''
-    TensorsToStack = []
-    for Image in Images:
-        Image.ImageTensor = self.Transform(Image.PILImage)
-        TensorsToStack.append(Image.ImageTensor)
-    StackedTensors = torch.stack(TensorsToStack)
-
-    with torch.no_grad():
-        Preprocessed       = self.PretrainedNet[1](StackedTensors)
-        PreprocessedTensor = self.PretrainedNet[0](Preprocessed)
-        EmbeddedImage      = self.TrainedProtoNet.encoder.forward(PreprocessedTensor)
-        DistanceMatrix     = EuclideanDistance(EmbeddedImage, self.PrototypeEmbedding)
-        ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
-
-    Matrices        = {"DistanceMatrix" : DistanceMatrix        , "ProbabilityMatrix" : ProbabilityMatrix        }
-    Classifications = {"DistanceBased"  : DistanceMatrix.min(1) , "ProbabilityBased"  : ProbabilityMatrix.max(1) }
-
-    if len(Images) != Classifications["DistanceBased"][0].shape[0]:
-        print("Images got lost in network application")
-        print(f"Number of Image tensors: {Classifications["DistanceBased"][0].shape[0]}")
-        print(f"Number of loaded images : {len(Images)}")
-        raise SystemExit()
-
-    for Index, Image in enumerate(Images):
-        if not torch.equal(StackedTensors[Index], Image.ImageTensor):
-            print("Error! Image indexing inconsistent - See Network application")
-            print(f"Occurred for Index {Index}")
-            raise SystemExit()
-        if Classifications["DistanceBased"][1][Index].item() == Classifications["ProbabilityBased"][1][Index].item():
-            Image.CoherentClassification = True
-
-        ClassificationID        = Classifications["DistanceBased"][1][Index].item()
-        Image.NNClassification  = [ClassificationID, self.LookUpTable[ClassificationID]]
-        Image.LookUpTable       = self.LookUpTable
-        Image.Distances         = Matrices["DistanceMatrix"][Index]
-        Image.Probabilities     = Matrices["ProbabilityMatrix"][Index]
-        Image.PreprocessedImage = PreprocessedTensor[Index]
-        Image.EmbeddedImage     = EmbeddedImage[Index]
-
-    with torch.no_grad():
-        # StackedTensors are features -> pass to encoder
-        EmbeddedFeatures = Network.encoder.forward(StackedTensors) 
-        
-        # Calculate distances to the loaded prototypes
-        DistanceMatrix = NN.EuclideanDistance(EmbeddedFeatures, Network.Prototypes)
-        
-        # Get the index of the closest prototype
-        _, Classifications_idx = DistanceMatrix.min(1)
-    '''
+    LOG.TestApplicationResults(LogFile, ValidationHandler.PreparedData, ValidationHandler.LookUpTable)

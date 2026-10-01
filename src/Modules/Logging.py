@@ -199,3 +199,15 @@ def DataExtraction_Two(Log, PreparedData, Samples, Classes):
                 Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
             Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
             RunningIndex += 1
+
+def TestApplicationResults(Log, Data, LookUpTable):
+    Log.W("\nTest application of the proto net\n===================================")
+    Log.W("*------------------------------------------------------------------------------------*")
+    Log.W("| Index   | Correct Class              | Classification             | Confidence [%] |")
+    Log.W("|---------|----------------------------|----------------------------|----------------|")
+    for Index in Data["MasterIndices"]:
+        Log.W(f"| {Index:<7} | {Data["LabelIndices"][Index]:>3} - {Data["Labels"][Index]:<20} | {Data["Classifications"][Index]:>3} - {LookUpTable[Data["Classifications"][Index]]:<20} | {round(100*Data["Probabilities"][Index], 5):<14} |")
+    Log.W("*------------------------------------------------------------------------------------*")
+    CorrectClassifications = [A == B for A, B in zip(Data["LabelIndices"], Data["Classifications"])]
+    Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
+    Log.W(f"Accuracy = {round(Accuracy, 3)}")
