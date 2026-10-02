@@ -178,19 +178,60 @@ def DataExtraction_One(Log, Name, FeatureTensor, Label, LabelIndex, PositionInde
         Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
     Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
 
-def DataExtraction_Two(Log, Data):
+def DataExtraction_Two(Log, PreparedData, Samples, Classes):
+    Log.W(f"\nFinished Tensor of shape [{PreparedData["FeatureTensor"].shape[0]}, {PreparedData["FeatureTensor"].shape[1]}, {PreparedData["FeatureTensor"].shape[2]}]")
     Log.W("Extracted data:\nIndex Name                                               Label                Index Tensor")
-    for Index in range(len(Data["Names"])):
-        Log.W(f"{Index:>5} ", NewLine=False)
-        Log.W(f"{Data["Names"][Index]:<50} ", NewLine=False)
-        Log.W(f"{Data["Labels"][Index]:<20} ", NewLine=False)
-        Log.W(f"{Data["Indices"][Index]:<5} ", NewLine=False)
-        FeatureTensorFront = Data["Features"][Index][:5]
-        FeatureTensorBack  = Data["Features"][Index][-5:-1]
-        Log.W("[ ", NewLine=False)
-        for Entry in FeatureTensorFront:
-            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-        Log.W("..., ", NewLine=False)
-        for Entry in FeatureTensorBack:
-            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-        Log.W(f"{round(Data["Features"][Index][-1].item(), 3):>6} ]")
+    RunningIndex = 0
+    for ClassIndex in range(PreparedData["FeatureTensor"].shape[0]):
+        for EntryIndex in range(PreparedData["FeatureTensor"].shape[1]):
+            Log.W(f"{RunningIndex:>5} ", NewLine=False)
+            Log.W(f"{PreparedData["Names"][RunningIndex]:<50} ", NewLine=False)
+            Log.W(f"{PreparedData["Labels"][RunningIndex]:<20} ", NewLine=False)
+            Log.W(f"{PreparedData["LabelIndices"][RunningIndex]:<5} ", NewLine=False)
+            FeatureTensor = PreparedData["FeatureTensor"][ClassIndex][EntryIndex]
+            FeatureTensorFront = FeatureTensor[:5]
+            FeatureTensorBack  = FeatureTensor[-5:-1]
+            Log.W("[ ", NewLine=False)
+            for Entry in FeatureTensorFront:
+                Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+            Log.W("..., ", NewLine=False)
+            for Entry in FeatureTensorBack:
+                Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+            Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
+            RunningIndex += 1
+
+def TestApplicationResults(Log, Data, LookUpTable):
+    Log.W("\nTest application of the proto net\n===================================")
+    Log.W("*------------------------------------------------------------------------------------*")
+    Log.W("| Index   | Correct Class              | Classification             | Confidence [%] |")
+    Log.W("|---------|----------------------------|----------------------------|----------------|")
+    for Index in Data["MasterIndices"]:
+        Log.W(f"| {Index:<7} | {Data["LabelIndices"][Index]:>3} - {Data["Labels"][Index]:<20} | {Data["Classifications"][Index]:>3} - {LookUpTable[Data["Classifications"][Index]]:<20} | {round(100*Data["Probabilities"][Index], 5):<14} |")
+    Log.W("*------------------------------------------------------------------------------------*")
+    CorrectClassifications = [A == B for A, B in zip(Data["LabelIndices"], Data["Classifications"])]
+    Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
+    Log.W(f"Accuracy = {round(Accuracy, 3)}")
+
+def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Data, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
+    ClassColours = {"18201_Polished": "darkgreen", "18201_Scratched": "brown", "22116_Polished": "greenyellow", "22116_Scratched": "red", "22348_Polished": "springgreen", "22348_Scratched": "darkorange"}
+    plt.figure(figsize=(12, 9))
+    plt.title(Title, fontsize=20)
+    plt.xlabel(f"PC1 ({round(100*(1-ValidationHandler.PreparedData["FeatureInformationLoss"][0]),2)}% of original variance)", fontsize=15)
+    plt.ylabel(f"PC2 ({round(100*(1-ValidationHandler.PreparedData["FeatureInformationLoss"][1]),2)}% of original variance)", fontsize=15)
+    plt.grid(True)
+
+    for Label in np.unique(np.array(ValidationHandler.PreparedData["Labels"])):
+        Mask = np.array(ValidationHandler.PreparedData["Labels"]) == Label
+        plt.scatter(Data[Mask, 0]           ,
+                    Data[Mask, 1]           ,
+                    c=[ClassColours[Label]] ,
+                    alpha=1                 ,
+                    label=Label             )
+
+    if len(Prototypes) > 0:
+        for Prototype in Prototypes:
+            plt.scatter(Prototype[0], Prototype[1], marker="*", s=400)
+
+    plt.legend()
+    plt.legend(prop={"size":15})
+    plt.savefig(f"{Controls.OutputPath}/{Name}.png")

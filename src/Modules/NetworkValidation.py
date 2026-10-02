@@ -1,5 +1,7 @@
 import torch
 
+from sklearn.decomposition import PCA
+
 from . import Logging as LOG
 from . import NeuralNetwork as NN
 
@@ -9,8 +11,11 @@ class ValidationHandler():
         self.Classes     : list[str] = DataSetParameters["Classes"]
         self.Images      : dict      = DataSet.Images
 
-        self.LabelMap    : dict      = EpisodeLoader.LabelMap
-        self.LookUpTable : dict      = EpisodeLoader.LookUpTable
+        self.LabelMap    : dict         = EpisodeLoader.LabelMap
+        self.LookUpTable : dict         = EpisodeLoader.LookUpTable
+        self.Prototypes  : torch.Tensor = Network.Prototypes
+
+        self.DataPrepared : bool = False
 
         self.PostInit()
 
@@ -18,79 +23,75 @@ class ValidationHandler():
         self.CombinedClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
 
     def ExtractData(self, LogFile, Controls, Mode="Testing"):
-        self.PreparedData = {"Features": [], "Names": [], "Labels": [], "Indices": []}
+        # Generate training tensors with the shape [NC, NS, DINOv2 Feature dimension]
+        self.PreparedData = {"MasterIndices": [], "Names": [], "Labels": [], "LabelIndices": [], "FeatureTensor": torch.empty((1, 1), dtype=torch.float32)}
         if Controls.WriteDetailedDebugInfo:
             LogFile.W("\nExtracting data from Data set for the test application")
             LogFile.W("Read data:\nIndex Name                                               Label                Index Tensor")
         RunningIndex = 0
+        ClassTensors = []
         for Sample in self.Samples:
             for Class in self.Classes:
-                Label = f"{Sample}_{Class}"
+                Label      = f"{Sample}_{Class}"
+                LabelIndex = self.LabelMap[Label]
+                Features = []
                 for Index in range(self.Images[Sample][Class]["Testing"]["DinoFeatures"].shape[0]):
-                    self.PreparedData["Features"].append(self.Images[Sample][Class]["Testing"]["DinoFeatures"][Index])
-                    self.PreparedData["Names"].append(self.Images[Sample][Class]["Testing"]["Names"][Index])
+                    ActiveFeatureTensor = self.Images[Sample][Class]["Testing"]["DinoFeatures"][Index]
+                    ActiveName = self.Images[Sample][Class]["Testing"]["Names"][Index]
+
+                    Features.append(ActiveFeatureTensor)
+                    self.PreparedData["MasterIndices"].append(RunningIndex)
+                    self.PreparedData["Names"].append(ActiveName)
                     self.PreparedData["Labels"].append(Label)
-                    self.PreparedData["Indices"].append(self.LabelMap[Label])
+                    self.PreparedData["LabelIndices"].append(LabelIndex)
+
                     if Controls.WriteDetailedDebugInfo:
-                        LOG.DataExtraction_One(LogFile, self.Images[Sample][Class]["Testing"]["Names"][Index], self.Images[Sample][Class]["Testing"]["DinoFeatures"][Index], Label, self.LabelMap[Label], RunningIndex)
+                        LOG.DataExtraction_One(LogFile, ActiveName, ActiveFeatureTensor,Label, LabelIndex, RunningIndex)
                     RunningIndex += 1
+                ClassTensors.append(torch.stack(Features))
+
+        self.PreparedData["FeatureTensor"] = torch.stack(ClassTensors)
         if Controls.WriteDetailedDebugInfo:
-            LOG.DataExtraction_Two(LogFile, self.PreparedData)
+            LOG.DataExtraction_Two(LogFile, self.PreparedData, self.Samples, self.Classes)
+        self.DataPrepared = True
 
 def NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler):
     LogFile.W("\n******************************\n*  Validating the Proto Net  *\n******************************")
     print("\nValidating the trained network")
     NetworkTestApplication(LogFile, Controls, ProtoNet, ValidationHandler)
+    PrincipalComponentAnalysis(LogFile, Controls,  ValidationHandler)
 
 def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ValidationHandler.ExtractData(LogFile, Controls, "Testing")
+    ViewDimension = ValidationHandler.PreparedData["FeatureTensor"].shape[0] * ValidationHandler.PreparedData["FeatureTensor"].shape[1]
+    ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(ViewDimension, 768))
 
-    '''
-    TensorsToStack = []
-    for Image in Images:
-        Image.ImageTensor = self.Transform(Image.PILImage)
-        TensorsToStack.append(Image.ImageTensor)
-    StackedTensors = torch.stack(TensorsToStack)
+    DistanceMatrix     = NN.EuclideanDistance(ValidationHandler.PreparedData["Embeddings"], Network.Prototypes)
+    ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
 
-    with torch.no_grad():
-        Preprocessed       = self.PretrainedNet[1](StackedTensors)
-        PreprocessedTensor = self.PretrainedNet[0](Preprocessed)
-        EmbeddedImage      = self.TrainedProtoNet.encoder.forward(PreprocessedTensor)
-        DistanceMatrix     = EuclideanDistance(EmbeddedImage, self.PrototypeEmbedding)
-        ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
+    ValidationHandler.PreparedData["Distances"]       = []
+    ValidationHandler.PreparedData["Probabilities"]   = []
+    ValidationHandler.PreparedData["Classifications"] = []
+    for Index in ValidationHandler.PreparedData["MasterIndices"]:
+        ValidationHandler.PreparedData["Distances"].append(DistanceMatrix.min(1)[0][Index].item())
+        ValidationHandler.PreparedData["Probabilities"].append(ProbabilityMatrix.max(1)[0][Index].item())
+        ValidationHandler.PreparedData["Classifications"].append(DistanceMatrix.min(1)[1][Index].item())
 
-    Matrices        = {"DistanceMatrix" : DistanceMatrix        , "ProbabilityMatrix" : ProbabilityMatrix        }
-    Classifications = {"DistanceBased"  : DistanceMatrix.min(1) , "ProbabilityBased"  : ProbabilityMatrix.max(1) }
+    LOG.TestApplicationResults(LogFile, ValidationHandler.PreparedData, ValidationHandler.LookUpTable)
 
-    if len(Images) != Classifications["DistanceBased"][0].shape[0]:
-        print("Images got lost in network application")
-        print(f"Number of Image tensors: {Classifications["DistanceBased"][0].shape[0]}")
-        print(f"Number of loaded images : {len(Images)}")
-        raise SystemExit()
+def PrincipalComponentAnalysis(LogFile, Controls, ValidationHandler, NumberOfComponents:int = 2):
+    Pca = PCA(n_components=NumberOfComponents)
+    ReshapedFeatureTensor = ValidationHandler.PreparedData["FeatureTensor"].reshape(-1, 768).detach().cpu().numpy()
+    Pca.fit(ReshapedFeatureTensor)
 
-    for Index, Image in enumerate(Images):
-        if not torch.equal(StackedTensors[Index], Image.ImageTensor):
-            print("Error! Image indexing inconsistent - See Network application")
-            print(f"Occurred for Index {Index}")
-            raise SystemExit()
-        if Classifications["DistanceBased"][1][Index].item() == Classifications["ProbabilityBased"][1][Index].item():
-            Image.CoherentClassification = True
+    ValidationHandler.PreparedData["TransformedFeatureTensor"] = Pca.transform(ReshapedFeatureTensor)
+    ValidationHandler.PreparedData["FeatureInformationLoss"]   = Pca.explained_variance_ratio_
+    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, ValidationHandler.PreparedData["TransformedFeatureTensor"], "PCA_DinoFeatures")
 
-        ClassificationID        = Classifications["DistanceBased"][1][Index].item()
-        Image.NNClassification  = [ClassificationID, self.LookUpTable[ClassificationID]]
-        Image.LookUpTable       = self.LookUpTable
-        Image.Distances         = Matrices["DistanceMatrix"][Index]
-        Image.Probabilities     = Matrices["ProbabilityMatrix"][Index]
-        Image.PreprocessedImage = PreprocessedTensor[Index]
-        Image.EmbeddedImage     = EmbeddedImage[Index]
-
-    with torch.no_grad():
-        # StackedTensors are features -> pass to encoder
-        EmbeddedFeatures = Network.encoder.forward(StackedTensors) 
-        
-        # Calculate distances to the loaded prototypes
-        DistanceMatrix = NN.EuclideanDistance(EmbeddedFeatures, Network.Prototypes)
-        
-        # Get the index of the closest prototype
-        _, Classifications_idx = DistanceMatrix.min(1)
-    '''
+    Pca = PCA(n_components=NumberOfComponents)
+    ReshapedEmbeddings = ValidationHandler.PreparedData["Embeddings"].detach().cpu().numpy()
+    Pca.fit(ReshapedEmbeddings)
+    ValidationHandler.PreparedData["TransformedEmbeddings"]  = Pca.transform(ReshapedEmbeddings)
+    ValidationHandler.PreparedData["FeatureInformationLoss"] = Pca.explained_variance_ratio_
+    TransformedPrototypes  = Pca.transform(ValidationHandler.Prototypes.detach().cpu().numpy())
+    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, ValidationHandler.PreparedData["TransformedEmbeddings"], "PCA_Embeddings", TransformedPrototypes)
