@@ -63,7 +63,8 @@ def NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler):
 
 def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ValidationHandler.ExtractData(LogFile, Controls, "Testing")
-    ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(6 * 10, 768))
+    ViewDimension = ValidationHandler.PreparedData["FeatureTensor"].shape[0] * ValidationHandler.PreparedData["FeatureTensor"].shape[1]
+    ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(ViewDimension, 768))
 
     DistanceMatrix     = NN.EuclideanDistance(ValidationHandler.PreparedData["Embeddings"], Network.Prototypes)
     ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)

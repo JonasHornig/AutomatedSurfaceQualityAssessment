@@ -19,14 +19,14 @@ import PreprocessImages as PPI
 class ControlVariables:
     # Inputs
     Modes      : tuple = ("Training", "Testing")
-    DataSet    : str   = "DummyDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
+    DataSet    : str   = "SmallDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
 
     FeatureDimension     : int   = 768
     EmbeddingDimension   : int   = 5
     NumberOfHiddenLayers : int   = 4
     Gamma                : float = 0.75
 
-    NumberOfEpisodes               : int   = 15
+    NumberOfEpisodes               : int   = 500
     LearningRate                   : float = 1e-4
     NumberOfClassesPerEpisode      : int   = 6     # N_C =< K
     NumberOfSupportSamplesPerClass : int   = 9     # N_S
