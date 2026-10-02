@@ -85,6 +85,12 @@ def PrincipalComponentAnalysis(LogFile, Controls, ValidationHandler, NumberOfCom
 
     ValidationHandler.PreparedData["TransformedFeatureTensor"] = Pca.transform(ReshapedFeatureTensor)
     ValidationHandler.PreparedData["FeatureInformationLoss"]   = Pca.explained_variance_ratio_
-    #ValidationHandler.TransformedPrototypes    = Pca.transform(ValidationHandler.Prototypes)
+    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, ValidationHandler.PreparedData["TransformedFeatureTensor"], "PCA_DinoFeatures")
 
-    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, "PCA_DinoFeatures")
+    Pca = PCA(n_components=NumberOfComponents)
+    ReshapedEmbeddings = ValidationHandler.PreparedData["Embeddings"].detach().cpu().numpy()
+    Pca.fit(ReshapedEmbeddings)
+    ValidationHandler.PreparedData["TransformedEmbeddings"]  = Pca.transform(ReshapedEmbeddings)
+    ValidationHandler.PreparedData["FeatureInformationLoss"] = Pca.explained_variance_ratio_
+    TransformedPrototypes  = Pca.transform(ValidationHandler.Prototypes.detach().cpu().numpy())
+    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, ValidationHandler.PreparedData["TransformedEmbeddings"], "PCA_Embeddings", TransformedPrototypes)

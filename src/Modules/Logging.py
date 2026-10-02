@@ -187,7 +187,7 @@ def DataExtraction_Two(Log, PreparedData, Samples, Classes):
             Log.W(f"{RunningIndex:>5} ", NewLine=False)
             Log.W(f"{PreparedData["Names"][RunningIndex]:<50} ", NewLine=False)
             Log.W(f"{PreparedData["Labels"][RunningIndex]:<20} ", NewLine=False)
-            Log.W(f"{PreparedData["Indices"][RunningIndex]:<5} ", NewLine=False)
+            Log.W(f"{PreparedData["LabelIndices"][RunningIndex]:<5} ", NewLine=False)
             FeatureTensor = PreparedData["FeatureTensor"][ClassIndex][EntryIndex]
             FeatureTensorFront = FeatureTensor[:5]
             FeatureTensorBack  = FeatureTensor[-5:-1]
@@ -212,7 +212,7 @@ def TestApplicationResults(Log, Data, LookUpTable):
     Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
     Log.W(f"Accuracy = {round(Accuracy, 3)}")
 
-def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Name, Title:str = "Principal Component Analysis"):
+def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Data, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
     ClassColours = {"18201_Polished": "darkgreen", "18201_Scratched": "brown", "22116_Polished": "greenyellow", "22116_Scratched": "red", "22348_Polished": "springgreen", "22348_Scratched": "darkorange"}
     plt.figure(figsize=(12, 9))
     plt.title(Title, fontsize=20)
@@ -222,11 +222,15 @@ def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Name, Title:str 
 
     for Label in np.unique(np.array(ValidationHandler.PreparedData["Labels"])):
         Mask = np.array(ValidationHandler.PreparedData["Labels"]) == Label
-        plt.scatter(ValidationHandler.PreparedData["TransformedFeatureTensor"][Mask, 0] ,
-                    ValidationHandler.PreparedData["TransformedFeatureTensor"][Mask, 1] ,
-                    c=[ClassColours[Label]]                                             ,
-                    alpha=1                                                             ,
-                    label=Label                                                         )
+        plt.scatter(Data[Mask, 0]           ,
+                    Data[Mask, 1]           ,
+                    c=[ClassColours[Label]] ,
+                    alpha=1                 ,
+                    label=Label             )
+
+    if len(Prototypes) > 0:
+        for Prototype in Prototypes:
+            plt.scatter(Prototype[0], Prototype[1], marker="*", s=400)
 
     plt.legend()
     plt.legend(prop={"size":15})
