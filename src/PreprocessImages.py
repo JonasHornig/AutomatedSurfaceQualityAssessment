@@ -19,11 +19,11 @@ class ControlVariables:
     DataSet : str       = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
 
     # Feature extractor, see NeuralNetwork.DINOV3_MODELS. The weights are located in <Repository>/src/Models/
-    FeatureExtractor : str = "DINOv3" #  --  DINOv3 (ViT-B/16)  --  DINOv3-H16plus (ViT-H+/16, about 10 times slower)
+    FeatureExtractor : str = "DINOv3" #  --  "DINOv3" (ViT-B/16)  --  "DINOv3-H16plus" (ViT-H+/16, about 10 times slower)  --  "DINOv1" (legacy, provided as files only)
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo : bool = True
+    WriteDetailedDebugInfo : bool = False # True: also logs the feature vector of every image (large log files)
 
     # Image handling
     TargetImageSize : tuple = (224,224)

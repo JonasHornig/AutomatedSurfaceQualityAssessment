@@ -1,6 +1,7 @@
 import torch
 
 from sklearn.decomposition import PCA
+from sklearn.metrics import confusion_matrix
 
 from . import Logging as LOG
 from . import NeuralNetwork as NN
@@ -53,6 +54,10 @@ def NetworkTestApplication(LogFile, Controls, Network, TestHandler):
     TestHandler.PreparedData["Classifications"] = Classifications.tolist()
 
     LOG.TestApplicationResults(LogFile, TestHandler.PreparedData, TestHandler.LookUpTable)
+
+    # Rows: true class, columns: predicted class, both in label map order
+    ConfusionMatrix = confusion_matrix(TestHandler.PreparedData["LabelIndices"], TestHandler.PreparedData["Classifications"], labels=list(range(len(TestHandler.LookUpTable))))
+    LOG.TestSummary(LogFile, Controls, ConfusionMatrix, TestHandler.LookUpTable)
 
 def PrincipalComponentAnalysis(Controls, TestHandler, NumberOfComponents: int = 2):
     # Each PCA is fitted on the test set it shows. The prototypes are projected with the PCA of the embeddings.

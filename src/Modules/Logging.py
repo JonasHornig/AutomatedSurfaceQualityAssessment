@@ -198,6 +198,35 @@ def TestApplicationResults(Log, Data, LookUpTable):
     Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
     Log.W(f"Accuracy = {Accuracy:.3f} %")
 
+def TestSummary(Log, Controls, ConfusionMatrix, LookUpTable):
+    '''
+    Per class accuracy and confusion matrix of the test set, also saved as ConfusionMatrix.csv.
+    The class names have the form <Material>_<SurfaceState>, so the matrix also gives the accuracy of telling
+    the surface states apart (regardless of the material) and of telling the materials apart (regardless of the surface state).
+    '''
+    ClassNames = [LookUpTable[Index] for Index in range(len(LookUpTable))]
+    Total      = ConfusionMatrix.sum()
+    def GroupAccuracy(Part):
+        # Fraction of test images whose predicted class has the same material (Part 0) or surface state (Part 1) as the true class
+        return 100 * sum(ConfusionMatrix[True_, Predicted] for True_ in range(len(ClassNames)) for Predicted in range(len(ClassNames))
+                         if ClassNames[True_].split("_", 1)[Part] == ClassNames[Predicted].split("_", 1)[Part]) / Total
+
+    Log.W("\nTest results per class\n========================")
+    Log.W("Confusion matrix (rows: true class, columns: predicted class)")
+    Log.W(f"{"":<20} " + " ".join(f"{Index:>6}" for Index in range(len(ClassNames))) + " |  Images | Accuracy [%]")
+    for Row, ClassName in enumerate(ClassNames):
+        Images = ConfusionMatrix[Row].sum()
+        Log.W(f"{Row:>2} {ClassName:<17} " + " ".join(f"{Count:>6}" for Count in ConfusionMatrix[Row]) + f" | {Images:>7} | {100*ConfusionMatrix[Row, Row]/Images:>12.3f}")
+    Message = (f"Accuracy: all classes {100*np.trace(ConfusionMatrix)/Total:.3f} %, "
+               f"surface state {GroupAccuracy(1):.3f} %, material {GroupAccuracy(0):.3f} %")
+    Log.W(Message)
+    print(Message)
+
+    with open(f"{Controls.OutputPath}/ConfusionMatrix.csv", "w") as ConfusionMatrixCsv:
+        ConfusionMatrixCsv.write("TrueClass," + ",".join(ClassNames) + "\n")
+        for Row, ClassName in enumerate(ClassNames):
+            ConfusionMatrixCsv.write(f"{ClassName}," + ",".join(str(Count) for Count in ConfusionMatrix[Row]) + "\n")
+
 def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianceRatio, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
     '''
     Colour encodes the material (sample), the marker shape encodes the surface state (class).

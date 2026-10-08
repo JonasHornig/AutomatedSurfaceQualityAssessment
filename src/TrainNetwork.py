@@ -21,7 +21,7 @@ import Modules.NetworkTesting as TEST
 class ControlVariables:
     # Inputs
     DataSet    : str   = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
-    FeatureExtractor : str = "DINOv3"   #  --  DINOv3 (ViT-B/16)  --  DINOv3-H16plus (ViT-H+/16)  --  see NeuralNetwork.DINOV3_MODELS
+    FeatureExtractor : str = "DINOv3"   #  --  "DINOv3" (ViT-B/16)  --  "DINOv3-H16plus" (ViT-H+/16)  --  "DINOv1" (legacy, provided as files only)
 
     # Network. The input dimension is taken from the feature files (768 for DINOv3 ViT-B/16)
     EmbeddingDimension   : int   = 5
@@ -43,7 +43,7 @@ class ControlVariables:
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo : bool = True
+    WriteDetailedDebugInfo : bool = False # True: also logs every episode, image and feature vector (large log files)
 
     def __post_init__(self):
         BaseDirectory = os.path.dirname(os.path.abspath(__file__))
