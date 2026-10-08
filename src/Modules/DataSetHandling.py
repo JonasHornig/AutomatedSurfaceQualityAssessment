@@ -108,6 +108,11 @@ class DataSet():
         LogFile.W(f"Total number of images: {self.TotalNumberOfImages}")
         LogFile.W(f"Loaded from HDF5 file")
 
+        for Entry in Warnings:
+            Message = f"WARNING! - Samples contain different classes. {Entry}"
+            print(Message)
+            LogFile.W(Message)
+
         if WriteDetailedDebugInfo:
             LogFile.W("\nStructure of the read image dictionary:")
             LOG.LogDict(LogFile, self.Images)

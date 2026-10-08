@@ -3,6 +3,8 @@ StartTime = time.time()
 
 import torch
 import os
+import random
+import numpy as np
 
 from tqdm import tqdm
 from dataclasses import dataclass, field
@@ -20,7 +22,7 @@ class ControlVariables:
     # Inputs
     Modes      : tuple = ("Training", "Testing")
     DataSet    : str   = "SmallDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
-    FeatureExtractor : str = "DINOv3"   #  --  DINOv3  --  DINOv2 (legacy files, actually DINOv1 ViT-B/16 features)
+    FeatureExtractor : str = "DINOv3"   #  --  DINOv3  --  legacy was DINOv1 ViT-B/16
 
     FeatureDimension     : int   = 768
     EmbeddingDimension   : int   = 5
@@ -29,6 +31,9 @@ class ControlVariables:
 
     NumberOfEpisodes               : int   = 500
     LearningRate                   : float = 1e-4
+    WeightDecay                    : float = 1e-2  # AdamW weight decay (1e-2 is the PyTorch default)
+    UseLearningRateScheduler       : bool  = False # Cosine annealing of the learning rate from LearningRate to 0 over NumberOfEpisodes
+    Seed                           : int   = 1     # Seed for all random number generators, makes training runs reproducible
     NumberOfClassesPerEpisode      : int   = 6     # N_C =< K
     NumberOfSupportSamplesPerClass : int   = 9     # N_S
     NumberOfQuerySamplesPerClass   : int   = 1     # N_Q
@@ -45,8 +50,15 @@ class ControlVariables:
         self.DataSetPath = f"{BaseDirectory}/DataSets/{self.DataSet}"
         self.OutputPath : str   = f"{BaseDirectory}/Outputs/"
 
+def SetSeed(Seed: int):
+    # Episode sampling uses Python's random module and torch, the weight initialisation uses torch
+    random.seed(Seed)
+    np.random.seed(Seed)
+    torch.manual_seed(Seed)
+
 def Main():
     Controls  = ControlVariables()
+    SetSeed(Controls.Seed)
     print("")
     LogFile = LOG.NoteFile(f"{Controls.OutputPath}/Training.log")
     LogFile.W("\n****************************\n*  Training the Proto Net  *\n****************************")
@@ -58,7 +70,7 @@ def Main():
         PPI.Main(LogFile)
 
     ProtoNet  = NN.ProtoNet(LogFile, Controls)
-    Optimizer = torch.optim.AdamW(ProtoNet.Encoder.parameters(), lr=Controls.LearningRate)
+    Optimizer = torch.optim.AdamW(ProtoNet.Encoder.parameters(), lr=Controls.LearningRate, weight_decay=Controls.WeightDecay)
     Scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(Optimizer, T_max=Controls.NumberOfEpisodes)
 
     EpisodeLoader = EPH.EpisodeLoader(DataSet.Images, DataSet.GetParameters(), Controls)
@@ -86,8 +98,11 @@ def Main():
 
         Loss.backward()
         Optimizer.step()
+        if Controls.UseLearningRateScheduler:
+            Scheduler.step()
 
     ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap)
+    ProtoNet.SaveNetwork(LogFile, Controls.OutputPath)
 
     print(f"Final validation Accuracy: {round(100*LossInfo["ValidationAccuracy"],3)} %")
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)

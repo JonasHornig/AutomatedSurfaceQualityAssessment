@@ -188,6 +188,12 @@ class ProtoNet():
         self.Encoder.train(WasTraining)
         self.Prototypes = torch.stack(Prototypes) # Dim: NumberOfClasses, EmbeddingDimension
 
+    def SaveNetwork(self, Log, OutputPath: str):
+        # The prototypes are ordered by the label map, which is saved separately as Labelmap.json
+        torch.save(self.Encoder.state_dict(), f"{OutputPath}/TrainedProtoNet.pth")
+        torch.save(self.Prototypes, f"{OutputPath}/PrototypeEmbedding.pth")
+        Log.W(f"\nSaved the encoder weights to {OutputPath}TrainedProtoNet.pth and the prototypes {list(self.Prototypes.shape)} to {OutputPath}PrototypeEmbedding.pth")
+
     def ApplyNetwork(self):
         return
 

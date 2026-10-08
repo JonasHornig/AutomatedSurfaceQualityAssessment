@@ -66,24 +66,24 @@ def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ViewDimension = ValidationHandler.PreparedData["FeatureTensor"].shape[0] * ValidationHandler.PreparedData["FeatureTensor"].shape[1]
     Network.Encoder.eval() # BatchNorm uses the running statistics from training instead of the statistics of the test data
     with torch.no_grad():
-        ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(ViewDimension, 768))
+        ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(ViewDimension, Controls.FeatureDimension))
 
     DistanceMatrix     = NN.EuclideanDistance(ValidationHandler.PreparedData["Embeddings"], Network.Prototypes)
     ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
 
-    ValidationHandler.PreparedData["Distances"]       = []
-    ValidationHandler.PreparedData["Probabilities"]   = []
-    ValidationHandler.PreparedData["Classifications"] = []
-    for Index in ValidationHandler.PreparedData["MasterIndices"]:
-        ValidationHandler.PreparedData["Distances"].append(DistanceMatrix.min(1)[0][Index].item())
-        ValidationHandler.PreparedData["Probabilities"].append(ProbabilityMatrix.max(1)[0][Index].item())
-        ValidationHandler.PreparedData["Classifications"].append(DistanceMatrix.min(1)[1][Index].item())
+    # Closest prototype and highest probability per test image, computed once for all images
+    MinimumDistances, Classifications = DistanceMatrix.min(1)
+    MaximumProbabilities, _           = ProbabilityMatrix.max(1)
+    MasterIndices = ValidationHandler.PreparedData["MasterIndices"]
+    ValidationHandler.PreparedData["Distances"]       = MinimumDistances[MasterIndices].tolist()
+    ValidationHandler.PreparedData["Probabilities"]   = MaximumProbabilities[MasterIndices].tolist()
+    ValidationHandler.PreparedData["Classifications"] = Classifications[MasterIndices].tolist()
 
     LOG.TestApplicationResults(LogFile, ValidationHandler.PreparedData, ValidationHandler.LookUpTable)
 
 def PrincipalComponentAnalysis(LogFile, Controls, ValidationHandler, NumberOfComponents:int = 2):
     Pca = PCA(n_components=NumberOfComponents)
-    ReshapedFeatureTensor = ValidationHandler.PreparedData["FeatureTensor"].reshape(-1, 768).detach().cpu().numpy()
+    ReshapedFeatureTensor = ValidationHandler.PreparedData["FeatureTensor"].reshape(-1, Controls.FeatureDimension).detach().cpu().numpy()
     Pca.fit(ReshapedFeatureTensor)
 
     ValidationHandler.PreparedData["TransformedFeatureTensor"] = Pca.transform(ReshapedFeatureTensor)

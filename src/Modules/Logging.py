@@ -82,15 +82,19 @@ def GenerateEncoder(Log, FeatureDimension, EmbeddingDimension, NumberOfHiddenLay
 
 def Training(Controls, EpisodeLoader, Log):
     Log.W("\nStart main training loop\n==========================")
-    Log.W("*----------------------------------------------------------*")
-    Log.W("| Parameter                           | Variable | Value   |")
-    Log.W("|                                     |          | (Input) |")
-    Log.W("|-------------------------------------|----------|---------|")
-    Log.W(f"| Number of Episodes                  |          | {Controls.NumberOfEpisodes:<4}    |")
-    Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<4}    |")
-    Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<4}    |")
-    Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<4}    |")
-    Log.W("*----------------------------------------------------------*")
+    Log.W("*-------------------------------------------------------------*")
+    Log.W("| Parameter                           | Variable | Value      |")
+    Log.W("|                                     |          | (Input)    |")
+    Log.W("|-------------------------------------|----------|------------|")
+    Log.W(f"| Seed                                |          | {Controls.Seed:<10} |")
+    Log.W(f"| Number of Episodes                  |          | {Controls.NumberOfEpisodes:<10} |")
+    Log.W(f"| Learning Rate                       |          | {Controls.LearningRate:<10.1e} |")
+    Log.W(f"| Learning Rate Scheduler (cosine)    |          | {str(Controls.UseLearningRateScheduler):<10} |")
+    Log.W(f"| Weight Decay                        |          | {Controls.WeightDecay:<10.1e} |")
+    Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<10} |")
+    Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<10} |")
+    Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<10} |")
+    Log.W("*-------------------------------------------------------------*")
 
 def WritelabelMap(Log, LabelMap):
     Log.W("\n*------------------------------*")
