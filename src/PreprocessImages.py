@@ -4,11 +4,10 @@ StartTime = time.time()
 import h5py
 import os
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from PIL import Image
 
 from tqdm import tqdm
-from torchvision.transforms import InterpolationMode
 
 import Modules.DataSetHandling as DATA
 import Modules.NeuralNetwork as NN
@@ -18,7 +17,6 @@ import Modules.Logging as LOG
 class ControlVariables:
     # Inputs
     DataSet : str       = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
-    Samples : list[str] = field(default_factory=lambda: [])
 
     # Feature extractor
     FeatureExtractor : str = "DINOv3"
@@ -27,15 +25,10 @@ class ControlVariables:
     # Flags
     #  --  True  --  False  --
     WriteDetailedDebugInfo : bool = True
-    ProcessAllImages       : bool = True
 
     # Image handling
     TargetImageSize : tuple = (224,224)
-    TargetBatchSize : int   = 64
-
-    # Parameter initialisation
-    NumberOfImages : int = 0
-    DataSetPath    : str = ""
+    MaxBatchSize    : int   = 64 # Maximum number of images passed through DINOv3 at once, limits the memory use
 
     def __post_init__(self):
         # Paths are resolved from the location of this script, so it can be run from any working directory
@@ -52,10 +45,6 @@ def Main(LogFile):
     MetaData  = {"FeatureExtractor": "dinov3_vitb16", "Weights": Controls.DinoWeightsName, "HubRepository": NN.DINOV3_HUB_REPOSITORY}
     LogFile.W("\nLoading DINOv3 model complete.")
 
-    if Controls.ProcessAllImages:
-        Samples = [Entry for Entry in os.listdir(Controls.DataSetPath) if os.path.isdir(os.path.join(Controls.DataSetPath, Entry))]
-    else:
-        Samples = Controls.Samples
     print("Load images from data set.")
     DataSet = DATA.DataSet(Controls.TargetImageSize)
     DataSet.LoadDataSet(LogFile, Controls, ForceLoadImages=True)
@@ -71,7 +60,7 @@ def Main(LogFile):
                         with Image.open(f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{ImagePath}") as PilImage:
                             ValidatedImage = DataSet.ValidateImage(PilImage, ImagePath, LogFile)
                         DataSet.Images[Sample][Class][Mode]["Images"].append(ValidatedImage)
-                    DinoModel.ApplyNetwork(DataSet.Images[Sample][Class][Mode], LogFile, ProgressBar, Controls.WriteDetailedDebugInfo)
+                    DinoModel.ApplyNetwork(DataSet.Images[Sample][Class][Mode], LogFile, ProgressBar, Controls.WriteDetailedDebugInfo, Controls.MaxBatchSize)
                     for PilImage in DataSet.Images[Sample][Class][Mode]["Images"]:
                         PilImage.close()
 

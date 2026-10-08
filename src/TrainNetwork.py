@@ -9,22 +9,21 @@ import numpy as np
 
 from tqdm import tqdm
 from datetime import datetime
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
 import Modules.DataSetHandling as DATA
 import Modules.NeuralNetwork as NN
 import Modules.Logging as LOG
 import Modules.EpisodeHandler as EPH
-import Modules.NetworkValidation as VAL
+import Modules.NetworkTesting as TEST
 
 @dataclass
 class ControlVariables:
     # Inputs
-    Modes      : tuple = ("Training", "Testing")
     DataSet    : str   = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
     FeatureExtractor : str = "DINOv3"   #  --  DINOv3  --  legacy was DINOv1 ViT-B/16
 
-    FeatureDimension     : int   = 768
+    # Network. The input dimension is taken from the feature files (768 for DINOv3 ViT-B/16)
     EmbeddingDimension   : int   = 5
     NumberOfHiddenLayers : int   = 4
     Gamma                : float = 0.75
@@ -45,9 +44,6 @@ class ControlVariables:
     # Flags
     #  --  True  --  False  --
     WriteDetailedDebugInfo : bool = True
-
-    # Parameter initialisation
-    NumberOfClasses : int = 0 # K
 
     def __post_init__(self):
         BaseDirectory = os.path.dirname(os.path.abspath(__file__))
@@ -79,12 +75,12 @@ def Main():
     DataSet = DATA.DataSet()
     DataSet.LoadDataSet(LogFile, Controls) # Stops with an error if the features have not been extracted with PreprocessImages.py yet
 
-    ProtoNet  = NN.ProtoNet(LogFile, Controls)
+    ProtoNet  = NN.ProtoNet(LogFile, Controls, DataSet.FeatureDimension)
     Optimizer = torch.optim.AdamW(ProtoNet.Encoder.parameters(), lr=Controls.LearningRate, weight_decay=Controls.WeightDecay)
     Scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(Optimizer, T_max=Controls.NumberOfEpisodes)
 
-    EpisodeLoader = EPH.EpisodeLoader(DataSet.Images, DataSet.GetParameters(), Controls)
-    LOG.Training(Controls, EpisodeLoader, LogFile)
+    EpisodeLoader = EPH.EpisodeLoader(DataSet, Controls)
+    LOG.Training(LogFile, Controls)
     LOG.ValidationSplit(LogFile, EpisodeLoader, Controls.WriteDetailedDebugInfo)
     EpisodeLoader.GenerateLabelMap(Controls.OutputPath)
     LOG.WritelabelMap(LogFile, EpisodeLoader.LabelMap)
@@ -123,8 +119,8 @@ def Main():
     LogFile.W(f"\n{Message}")
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
 
-    ValidationHandler = VAL.ValidationHandler(DataSet, DataSet.GetParameters(), EpisodeLoader, ProtoNet)
-    VAL.NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler)
+    TestHandler = TEST.TestHandler(DataSet, EpisodeLoader, ProtoNet)
+    TEST.NetworkTestMain(LogFile, Controls, ProtoNet, TestHandler)
 
     Duration = time.time() - StartTime
     Hours = int(Duration // 3600)

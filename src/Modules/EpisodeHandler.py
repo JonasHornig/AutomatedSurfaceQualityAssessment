@@ -6,10 +6,10 @@ import torch
 from . import Logging as LOG
 
 class EpisodeLoader():
-    def __init__(self, DataSet, DataSetParameters, InputParameter):
-        self.Samples                   : list[str] = DataSetParameters["Samples"]
-        self.Classes                   : list[str] = DataSetParameters["Classes"]
-        self.Images                    : dict      = DataSet
+    def __init__(self, DataSet, InputParameter):
+        self.Samples                   : list[str] = DataSet.Samples
+        self.Classes                   : list[str] = DataSet.Classes
+        self.Images                    : dict      = DataSet.Images
         self.NumberOfClassesPerEpisode : int       = InputParameter.NumberOfClassesPerEpisode
 
         self.NumberOfSupportSamplesPerClass    : int = InputParameter.NumberOfSupportSamplesPerClass

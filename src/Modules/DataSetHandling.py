@@ -4,7 +4,6 @@ import torch
 
 from PIL import Image
 
-from . import AuxiliaryCode as AUX
 from . import Logging as LOG
 
 class DataSet():
@@ -32,13 +31,17 @@ class DataSet():
         self.Samples : list[str] = []
         self.Modes   : list[str] = []
 
-        self.ProcessedDataSet  : bool = False
-        self.Overwriteh5pyFile : bool = False
-
         self.DataSetPath : str  = ""
         self.DataSetName : str  = ""
         self.TotalNumberOfImages    : int = 0
         self.NumberOfResizedImages  : int = 0
+
+    @property
+    def FeatureDimension(self) -> int:
+        # Length of the DINO feature vectors, read from the first loaded class
+        Sample, Class = self.Samples[0], self.Classes[0]
+        Mode          = next(iter(self.Images[Sample][Class]))
+        return self.Images[Sample][Class][Mode]["DinoFeatures"].shape[1]
 
     def ValidateImage(self, Image: Image.Image, ImageName: str, LogFile) -> Image.Image:
         # DINOv3 expects 3 channel RGB input. convert() always returns a copy, so the opened file can be closed afterwards.
@@ -89,7 +92,7 @@ class DataSet():
             with h5py.File(f"{self.DataSetPath}/{HdfFileName}", "r") as HdfFile:
                 Sample = HdfFileName.split("_")[1]
                 self.Samples.append(Sample)
-                AUX.AppendDictionary(self.Images, Sample, "dict")
+                self.Images[Sample] = {}
 
                 if self.Classes and not all(Class in list(HdfFile.keys()) for Class in self.Classes):
                     Warnings.append(f"Classes for sample {self.Samples[-2]}: {self.Classes} - Classes for sample {self.Samples[-1]}: {list(HdfFile.keys())}")
@@ -99,15 +102,14 @@ class DataSet():
                     self.Classes.remove("MetaData")
                 
                 for Class in self.Classes:
-                        AUX.AppendDictionary(self.Images[Sample], Class, "dict")
-                        for Mode in list(HdfFile[Class].keys()): # type: ignore
-                            AUX.AppendDictionary(self.Images[Sample][Class], Mode, "dict")
-                            self.Images[Sample][Class][Mode] = {
-                                "DinoFeatures" : torch.tensor(HdfFile[f"{Class}/{Mode}/DinoFeatures"][:])               , # type: ignore
-                                "Names"        : [Name.decode("utf-8") for Name in HdfFile[f"{Class}/{Mode}/Names"][:]] } # type: ignore
-                            self.TotalNumberOfImages += len(self.Images[Sample][Class][Mode]["Names"])
-                    
-                            LogFile.W(f"| {Class:<10} | {Sample:<10} | {Mode:<10} | {str(len(self.Images[Sample][Class][Mode]["Names"])):<10} |")
+                    self.Images[Sample][Class] = {}
+                    for Mode in list(HdfFile[Class].keys()): # type: ignore
+                        self.Images[Sample][Class][Mode] = {
+                            "DinoFeatures" : torch.tensor(HdfFile[f"{Class}/{Mode}/DinoFeatures"][:])               , # type: ignore
+                            "Names"        : [Name.decode("utf-8") for Name in HdfFile[f"{Class}/{Mode}/Names"][:]] } # type: ignore
+                        self.TotalNumberOfImages += len(self.Images[Sample][Class][Mode]["Names"])
+
+                        LogFile.W(f"| {Class:<10} | {Sample:<10} | {Mode:<10} | {str(len(self.Images[Sample][Class][Mode]["Names"])):<10} |")
 
         LogFile.W("*---------------------------------------------------*")
         self.Samples = list(dict.fromkeys(self.Samples))
@@ -126,40 +128,24 @@ class DataSet():
             LogFile.W("\nStructure of the read image dictionary:")
             LOG.LogDict(LogFile, self.Images)
 
-        self.ProcessedDataSet = True
-
-    def LoadDataSetImages(self, LogFile, Samples: list = [], WriteDetailedDebugInfo: bool = True):
+    def LoadDataSetImages(self, LogFile, WriteDetailedDebugInfo: bool = True):
         BasePath = f"{self.DataSetPath}/Images"
 
-        if not Samples:
-            self.Samples = [Entry for Entry in sorted(os.listdir(BasePath)) if os.path.isdir(os.path.join(BasePath, Entry))]
-        else:
-            self.Samples = Samples
+        # Only the image names are collected here. The images themselves are opened one class at a time by PreprocessImages.py, to limit the memory use.
+        self.Samples = [Entry for Entry in sorted(os.listdir(BasePath)) if os.path.isdir(os.path.join(BasePath, Entry))]
         for Sample in self.Samples:
-            AUX.AppendDictionary(self.Images, Sample, "dict")
+            self.Images[Sample] = {}
             SamplePath = f"{BasePath}/{Sample}"
 
             self.Classes = [Entry for Entry in sorted(os.listdir(SamplePath)) if os.path.isdir(os.path.join(SamplePath, Entry))]
             for Class in self.Classes:
-                AUX.AppendDictionary(self.Images[Sample], Class, "dict")
+                self.Images[Sample][Class] = {}
                 ClassPath = f"{SamplePath}/{Class}"
 
                 self.Modes = [Entry for Entry in sorted(os.listdir(ClassPath)) if os.path.isdir(os.path.join(ClassPath, Entry))]
                 for Mode in self.Modes:
-                    AUX.AppendDictionary(self.Images[Sample][Class], Mode, "dict")
-                    ModePath = f"{ClassPath}/{Mode}"
-
-                    ImageNames = [Entry for Entry in sorted(os.listdir(ModePath)) if Entry.endswith(".tif")]
-                    AUX.AppendDictionary(self.Images[Sample][Class][Mode], "Images", "list")
-                    AUX.AppendDictionary(self.Images[Sample][Class][Mode], "Names" , "list")
-                    for ImageName in ImageNames:
-                        ImagePath      = f"{ModePath}/{ImageName}"
-                        '''
-                        PilImage       = Image.open(ImagePath)
-                        ValidatedImage = self.ValidateImage(PilImage, ImageName, LogFile)
-                        self.Images[Sample][Class][Mode]["Images"].append(ValidatedImage)
-                        '''
-                        self.Images[Sample][Class][Mode]["Names"].append(ImageName)
+                    ImageNames = [Entry for Entry in sorted(os.listdir(f"{ClassPath}/{Mode}")) if Entry.endswith(".tif")]
+                    self.Images[Sample][Class][Mode] = {"Images": [], "Names": ImageNames}
                     self.TotalNumberOfImages += len(ImageNames)
                 
                     LogFile.W(f"| {Class:<10} | {Sample:<10} | {Mode:<10} | {str(len(ImageNames)):<10} |")
@@ -173,9 +159,3 @@ class DataSet():
         if WriteDetailedDebugInfo:
             LogFile.W("\nStructure of the read image dictionary:")
             LOG.LogDict(LogFile, self.Images)
-
-    def GetParameters(self) -> dict:
-        return {
-            "Samples"                : self.Samples                ,
-            "Classes"                : self.Classes                ,
-            "Images"                 : self.Images                 }

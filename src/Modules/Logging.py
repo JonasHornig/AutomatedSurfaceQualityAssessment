@@ -2,9 +2,9 @@ import os
 import h5py
 import numpy as np
 import torch
-
-import numpy as np
 import matplotlib.pyplot as plt
+
+from matplotlib.lines import Line2D
 
 class NoteFile():
     def __init__(self, FilePath: str):
@@ -47,28 +47,16 @@ def LogHdf5Write(Log, Controls, HdfFile):
     Log.W(f"HDF5 paths:")
     HdfFile.visititems(PrintLeaf)
 
-def ApplyDinoNetwork_FirstInstance(Log, MaxBatchSize, BatchSize, NumberOfBatches, DetailedLog, Images):
-    Log.W(f"Maximum Batch Size: {MaxBatchSize}, Calculated Batch Size: {BatchSize}, Resulting Number of Batches: {NumberOfBatches}")
-        
-    if DetailedLog:
-        for Index, _ in enumerate(Images["Images"]):
-            Log.W(f"    {Index:>5} - {Images["Names"][Index]}: {Images["Images"][Index]}")
-    
-        Log.W("    Batching:")
+def FormatVector(Vector, NumberOfEntries: int = 5) -> str:
+    # Shortened representation of a long vector: its first and last entries
+    Front = ", ".join(f"{Entry: 7.4f}" for Entry in Vector[:NumberOfEntries].tolist())
+    Back  = ", ".join(f"{Entry: 7.4f}" for Entry in Vector[-NumberOfEntries:].tolist())
+    return f"[{Front}, ..., {Back}] ({len(Vector)} entries)"
 
-def ApplyDinoNetwork_SecondInstance(Log, DetailedLog, BatchedImages, BatchFeatures, BatchedNames):
-    if DetailedLog:
-        for Index, _ in enumerate(BatchedImages):
-            Vector = BatchFeatures[Index]
-            Log.W(f"        {Index:>5} {BatchedNames[Index]:<30} [1 x {len(Vector):>5}] [{", ".join(f"{Entry: 7.4f}" for Entry in Vector[:5])}, ..., {", ".join(f"{Entry: 7.4f}" for Entry in Vector[-5:])}]")
-
-def ApplyDinoNetwork_ThirdInstance(DetailedLog, Log, FeatureTensor, Images):
-    if DetailedLog:
-        Log.W("    Extracted Features:")
-        Log.W(f"    Index   Name                           Feature Vector                                                                                  PIL Image")
-        for Index in range(FeatureTensor.shape[0]):
-            Vector = FeatureTensor[Index]
-            Log.W(f"    {Index:>5} - {Images["Names"][Index]}: [{", ".join(f"{Entry: 7.4f}" for Entry in Vector[:5])}, ..., {", ".join(f"{Entry: 7.4f}" for Entry in Vector[-5:])}] {Images["Images"][Index]}")
+def FeatureBatch(Log, BatchIndex, NumberOfBatches, Names, Features):
+    Log.W(f"    Batch {BatchIndex+1} out of {NumberOfBatches}")
+    for Index, Name in enumerate(Names):
+        Log.W(f"    {Index:>5} {Name:<40} {FormatVector(Features[Index])}")
 
 def GenerateEncoder(Log, FeatureDimension, EmbeddingDimension, NumberOfHiddenLayers, Gamma, Indices, Dimensions):
     Log.W(f"Reducing from {FeatureDimension} to {EmbeddingDimension} Dimensions with {NumberOfHiddenLayers} hidden layers - Gamma = {Gamma}")
@@ -80,7 +68,7 @@ def GenerateEncoder(Log, FeatureDimension, EmbeddingDimension, NumberOfHiddenLay
         Log.W(f"{Dimension:>4}", NewLine=False)
     Log.W("]")
 
-def Training(Controls, EpisodeLoader, Log):
+def Training(Log, Controls):
     Log.W("\nStart main training loop\n==========================")
     Log.W("*-------------------------------------------------------------*")
     Log.W("| Parameter                           | Variable | Value      |")
@@ -195,41 +183,26 @@ def DataExtraction(Log, PreparedData):
     for Label in dict.fromkeys(PreparedData["Labels"]):
         Log.W(f"    {Label:<20} {PreparedData["Labels"].count(Label):>6}")
     Log.W("Extracted data:\nIndex Name                                               Label                Index Tensor")
-    for RunningIndex in range(PreparedData["FeatureTensor"].shape[0]):
-        Log.W(f"{RunningIndex:>5} ", NewLine=False)
-        Log.W(f"{PreparedData["Names"][RunningIndex]:<50} ", NewLine=False)
-        Log.W(f"{PreparedData["Labels"][RunningIndex]:<20} ", NewLine=False)
-        Log.W(f"{PreparedData["LabelIndices"][RunningIndex]:<5} ", NewLine=False)
-        FeatureTensor = PreparedData["FeatureTensor"][RunningIndex]
-        FeatureTensorFront = FeatureTensor[:5]
-        FeatureTensorBack  = FeatureTensor[-5:-1]
-        Log.W("[ ", NewLine=False)
-        for Entry in FeatureTensorFront:
-            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-        Log.W("..., ", NewLine=False)
-        for Entry in FeatureTensorBack:
-            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-        Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
+    for Index in range(PreparedData["FeatureTensor"].shape[0]):
+        Log.W(f"{Index:>5} {PreparedData["Names"][Index]:<50} {PreparedData["Labels"][Index]:<20} {PreparedData["LabelIndices"][Index]:<5} {FormatVector(PreparedData["FeatureTensor"][Index])}")
 
 def TestApplicationResults(Log, Data, LookUpTable):
     Log.W("\nTest application of the proto net\n===================================")
     Log.W("*------------------------------------------------------------------------------------*")
     Log.W("| Index   | Correct Class              | Classification             | Confidence [%] |")
     Log.W("|---------|----------------------------|----------------------------|----------------|")
-    for Index in Data["MasterIndices"]:
+    for Index in range(len(Data["Labels"])):
         Log.W(f"| {Index:<7} | {Data["LabelIndices"][Index]:>3} - {Data["Labels"][Index]:<20} | {Data["Classifications"][Index]:>3} - {LookUpTable[Data["Classifications"][Index]]:<20} | {100*Data["Probabilities"][Index]:>14.3f} |")
     Log.W("*------------------------------------------------------------------------------------*")
     CorrectClassifications = [A == B for A, B in zip(Data["LabelIndices"], Data["Classifications"])]
     Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
     Log.W(f"Accuracy = {Accuracy:.3f} %")
 
-def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Data, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
+def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianceRatio, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
     '''
     Colour encodes the material (sample), the marker shape encodes the surface state (class).
     Prototypes use the colour and shape of their class, drawn larger and with a dark outline.
     '''
-    from matplotlib.lines import Line2D
-
     # Colour blind safe categorical colours, validated as a set of three for scatter plots. Assigned in fixed sample order.
     MaterialColours = ["#2a78d6", "#eb6834", "#1baf7a"]
     StateMarkers    = {"Polished": "o", "Scratched": "^"}
@@ -237,37 +210,37 @@ def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Data, Name, Prot
     TextColour      = "#1f1f1f"
     GridColour      = "#e3e3e3"
 
-    if len(ValidationHandler.Samples) > len(MaterialColours):
-        raise ValueError(f"Only {len(MaterialColours)} materials can be told apart reliably in one PCA plot, got {len(ValidationHandler.Samples)}")
-    SampleColour = {Sample: MaterialColours[Index] for Index, Sample in enumerate(ValidationHandler.Samples)}
+    if len(TestHandler.Samples) > len(MaterialColours):
+        raise ValueError(f"Only {len(MaterialColours)} materials can be told apart reliably in one PCA plot, got {len(TestHandler.Samples)}")
+    SampleColour = {Sample: MaterialColours[Index] for Index, Sample in enumerate(TestHandler.Samples)}
     ClassMarker  = {}
-    for Class in ValidationHandler.Classes:
+    for Class in TestHandler.Classes:
         ClassMarker[Class] = StateMarkers.get(Class, FallbackMarkers[len(ClassMarker) % len(FallbackMarkers)])
 
     Figure, Axis = plt.subplots(figsize=(12, 8))
     Axis.set_title(Title, fontsize=18, color=TextColour)
-    Axis.set_xlabel(f"PC1 ({100*ValidationHandler.PreparedData["ExplainedVarianceRatio"][0]:.2f}% of original variance)", fontsize=14, color=TextColour)
-    Axis.set_ylabel(f"PC2 ({100*ValidationHandler.PreparedData["ExplainedVarianceRatio"][1]:.2f}% of original variance)", fontsize=14, color=TextColour)
+    Axis.set_xlabel(f"PC1 ({100*ExplainedVarianceRatio[0]:.2f}% of original variance)", fontsize=14, color=TextColour)
+    Axis.set_ylabel(f"PC2 ({100*ExplainedVarianceRatio[1]:.2f}% of original variance)", fontsize=14, color=TextColour)
     Axis.grid(True, color=GridColour, linewidth=0.8)
     Axis.set_axisbelow(True)
     for Spine in Axis.spines.values():
         Spine.set_color("#b0b0b0")
     Axis.tick_params(colors="#555555")
 
-    Labels = np.array(ValidationHandler.PreparedData["Labels"])
-    for Sample in ValidationHandler.Samples:
-        for Class in ValidationHandler.Classes:
+    Labels = np.array(TestHandler.PreparedData["Labels"])
+    for Sample in TestHandler.Samples:
+        for Class in TestHandler.Classes:
             Mask = Labels == f"{Sample}_{Class}"
             Axis.scatter(Data[Mask, 0], Data[Mask, 1], s=40, c=SampleColour[Sample], marker=ClassMarker[Class], alpha=0.75, edgecolors="white", linewidths=0.6, zorder=2)
 
     # Prototypes are ordered by the label map, so the look up table gives the class of each prototype
     for Index, Prototype in enumerate(Prototypes):
-        Sample, Class = ValidationHandler.LookUpTable[Index].split("_", 1)
+        Sample, Class = TestHandler.LookUpTable[Index].split("_", 1)
         Axis.scatter(Prototype[0], Prototype[1], s=200, c=SampleColour[Sample], marker=ClassMarker[Class], edgecolors=TextColour, linewidths=1, zorder=3)
 
     # Two separate legends, one per encoding, placed outside of the data area
-    MaterialHandles = [Line2D([], [], marker="s", linestyle="", markersize=11, markerfacecolor=SampleColour[Sample], markeredgecolor="white", label=Sample) for Sample in ValidationHandler.Samples]
-    StateHandles    = [Line2D([], [], marker=ClassMarker[Class], linestyle="", markersize=10, markerfacecolor="#8a8a8a", markeredgecolor="white", label=Class) for Class in ValidationHandler.Classes]
+    MaterialHandles = [Line2D([], [], marker="s", linestyle="", markersize=11, markerfacecolor=SampleColour[Sample], markeredgecolor="white", label=Sample) for Sample in TestHandler.Samples]
+    StateHandles    = [Line2D([], [], marker=ClassMarker[Class], linestyle="", markersize=10, markerfacecolor="#8a8a8a", markeredgecolor="white", label=Class) for Class in TestHandler.Classes]
     StateHandles.append(Line2D([], [], marker="o", linestyle="", markersize=np.sqrt(200), markerfacecolor="#8a8a8a", markeredgecolor=TextColour, markeredgewidth=1, label="Class prototype"))
     MaterialLegend = Axis.legend(handles=MaterialHandles, title="Material", loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour)
     Axis.add_artist(MaterialLegend)
