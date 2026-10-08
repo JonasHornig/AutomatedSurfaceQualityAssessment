@@ -134,11 +134,10 @@ class ProtoNet():
         InputTensor = torch.cat([ReshapedPreprocessedSupportTensor, ReshapedPreprocessedQueryTensor], 0)
 
         self.OutputTensor     = self.Encoder.forward( InputTensor                        )
-        self.ValidationOutput = self.Encoder.forward( ReshapedPreprocessedValidateTensor )
 
         OutputDimensions = self.OutputTensor.size(-1)
         QueryEmbeddings = self.OutputTensor[NumberOfClasses * NumberOfSupportSamples:]
-        self.Prototypes = self.OutputTensor[:NumberOfClasses * NumberOfSupportSamples].view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
+        EpisodePrototypes = self.OutputTensor[:NumberOfClasses * NumberOfSupportSamples].view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
 
         '''
         log_softmax = (z_i) = log(e^(z_i)/sum(e^(z_j))) = z_i - log(sum(e^(z_j)))
@@ -147,14 +146,23 @@ class ProtoNet():
         log_softmax( -d_(ik) ) = -d_(ik) - log(sum^(N_C)_(k'=1)(e^(-d_(ik'))))
         '''
 
-        DistanceMatrix    = EuclideanDistance(QueryEmbeddings, self.Prototypes)
+        DistanceMatrix    = EuclideanDistance(QueryEmbeddings, EpisodePrototypes)
         ProbabilityMatrix = F.log_softmax(-DistanceMatrix, dim=1).view(NumberOfClasses, NumberOfQuerySamples, -1)
         Loss              = -ProbabilityMatrix.gather(2, TargetIndices).squeeze().view(-1).mean()                 # J
 
         _, ResultLabel = ProbabilityMatrix.max(2)
         Accuracy       = torch.eq(ResultLabel.squeeze(), TargetIndices.squeeze()).float().mean()
 
-        ValidationDistanceMatrix = EuclideanDistance(self.ValidationOutput, self.Prototypes)
+        # Validation is done in evaluation mode (BatchNorm uses its running statistics) and without tracking gradients,
+        # so that it neither influences the training nor depends on the composition of the batch.
+        # The support samples are embedded again in evaluation mode, so that prototypes and validation samples are normalised the same way.
+        self.Encoder.eval()
+        with torch.no_grad():
+            ValidationPrototypes  = self.Encoder.forward(ReshapedPreprocessedSupportTensor).view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
+            self.ValidationOutput = self.Encoder.forward(ReshapedPreprocessedValidateTensor)
+        self.Encoder.train()
+
+        ValidationDistanceMatrix = EuclideanDistance(self.ValidationOutput, ValidationPrototypes)
         _, ValidationResultLabel = ValidationDistanceMatrix.min(1)
         ValidationAccuracy       = torch.eq(ValidationResultLabel.squeeze(), TargetValidationIndices.squeeze()).float().mean()
 
@@ -162,6 +170,23 @@ class ProtoNet():
             "Loss": Loss.item(),
             "Accuracy": Accuracy.item(),
             "ValidationAccuracy": ValidationAccuracy.item()}
+
+    def ComputePrototypes(self, Images, LabelMap, Mode: str = "Training"):
+        '''
+        Computes the final class prototypes after training as the mean embedding of all images of a class.
+        The prototypes are ordered by the label map, so prototype k belongs to the class with label k.
+        The prototypes of the individual episodes can't be used for this, as their order follows the random class selection of the episode.
+        '''
+        WasTraining = self.Encoder.training
+        self.Encoder.eval()
+        Prototypes = []
+        with torch.no_grad():
+            for CombinedClass, _ in sorted(LabelMap.items(), key=lambda Entry: Entry[1]):
+                Sample, Class = CombinedClass.split("_", 1)
+                Embeddings = self.Encoder(Images[Sample][Class][Mode]["DinoFeatures"])
+                Prototypes.append(Embeddings.mean(0))
+        self.Encoder.train(WasTraining)
+        self.Prototypes = torch.stack(Prototypes) # Dim: NumberOfClasses, EmbeddingDimension
 
     def ApplyNetwork(self):
         return

@@ -59,7 +59,6 @@ def Main():
 
     ProtoNet  = NN.ProtoNet(LogFile, Controls)
     Optimizer = torch.optim.AdamW(ProtoNet.Encoder.parameters(), lr=Controls.LearningRate)
-    Optimizer.zero_grad()
     Scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(Optimizer, T_max=Controls.NumberOfEpisodes)
 
     EpisodeLoader = EPH.EpisodeLoader(DataSet.Images, DataSet.GetParameters(), Controls)
@@ -72,11 +71,13 @@ def Main():
     RunningValidationAccuracy = []
 
     print("Main training loop")
+    ProtoNet.Encoder.train()
     for EpisodeIndex in tqdm(range(1, Controls.NumberOfEpisodes + 1), desc="Progress", unit="ep"):
         if Controls.WriteDetailedDebugInfo:
             LogFile.W(f"\nEpisode {EpisodeIndex:>5} out of {Controls.NumberOfEpisodes:>5}")
 
         ActiveEpisode = EpisodeLoader.GetRandomEpisode(LogFile, Controls)
+        Optimizer.zero_grad() # Gradients have to be reset each episode, otherwise they accumulate over all previous episodes
         Loss, LossInfo = ProtoNet.CalculateLoss(ActiveEpisode)
 
         RunningLoss.append(LossInfo["Loss"])
@@ -85,6 +86,8 @@ def Main():
 
         Loss.backward()
         Optimizer.step()
+
+    ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap)
 
     print(f"Final validation Accuracy: {round(100*LossInfo["ValidationAccuracy"],3)} %")
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)

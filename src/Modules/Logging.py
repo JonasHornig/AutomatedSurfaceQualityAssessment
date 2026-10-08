@@ -124,11 +124,15 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
     Log.W("*---------------------------------------------*")
     StandardDeviationCutOff = int(NumberOfEpisodes/10)
     if StandardDeviationCutOff > 0:
+        LossMean                = np.mean(RunningLoss[-StandardDeviationCutOff:])
         LossStandardDeviation   = np.std(RunningLoss[-StandardDeviationCutOff:])
+        ValAccMean              = np.mean([100*Entry for Entry in RunningValidationAccuracy[-StandardDeviationCutOff:]])
         ValAccStandardDeviation = np.std([100*Entry for Entry in RunningValidationAccuracy[-StandardDeviationCutOff:]])
-        Log.W(f"Standard deviation during the last 10% of training episodes")
-        Log.W(f"Loss               : {round(LossStandardDeviation,3)}")
-        Log.W(f"Validation Accuracy: {round(ValAccStandardDeviation,3)} %")
+        Log.W(f"Statistics over the last 10% of training episodes ({StandardDeviationCutOff} episodes)")
+        Log.W(f"Loss mean                              : {LossMean:.3f}")
+        Log.W(f"Loss standard deviation                : {LossStandardDeviation:.3f}")
+        Log.W(f"Validation accuracy mean               : {ValAccMean:.3f} %")
+        Log.W(f"Validation accuracy standard deviation : {ValAccStandardDeviation:.3f} percentage points")
 
     with open(f"{Controls.OutputPath}TrainingProcess.csv", "w") as TrainingProcessCsv:
         TrainingProcessCsv.write("Episode Index,         Loss, Validation Accuracy\n")
@@ -213,25 +217,55 @@ def TestApplicationResults(Log, Data, LookUpTable):
     Log.W(f"Accuracy = {round(Accuracy, 3)}")
 
 def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Data, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
-    ClassColours = {"18201_Polished": "darkgreen", "18201_Scratched": "brown", "22116_Polished": "greenyellow", "22116_Scratched": "red", "22348_Polished": "springgreen", "22348_Scratched": "darkorange"}
-    plt.figure(figsize=(12, 9))
-    plt.title(Title, fontsize=20)
-    plt.xlabel(f"PC1 ({round(100*(1-ValidationHandler.PreparedData["FeatureInformationLoss"][0]),2)}% of original variance)", fontsize=15)
-    plt.ylabel(f"PC2 ({round(100*(1-ValidationHandler.PreparedData["FeatureInformationLoss"][1]),2)}% of original variance)", fontsize=15)
-    plt.grid(True)
+    '''
+    Colour encodes the material (sample), the marker shape encodes the surface state (class).
+    Prototypes use the colour and shape of their class, drawn larger and with a dark outline.
+    '''
+    from matplotlib.lines import Line2D
 
-    for Label in np.unique(np.array(ValidationHandler.PreparedData["Labels"])):
-        Mask = np.array(ValidationHandler.PreparedData["Labels"]) == Label
-        plt.scatter(Data[Mask, 0]           ,
-                    Data[Mask, 1]           ,
-                    c=[ClassColours[Label]] ,
-                    alpha=1                 ,
-                    label=Label             )
+    # Colour blind safe categorical colours, validated as a set of three for scatter plots. Assigned in fixed sample order.
+    MaterialColours = ["#2a78d6", "#eb6834", "#1baf7a"]
+    StateMarkers    = {"Polished": "o", "Scratched": "^"}
+    FallbackMarkers = ["s", "D", "v", "P"]
+    TextColour      = "#1f1f1f"
+    GridColour      = "#e3e3e3"
 
-    if len(Prototypes) > 0:
-        for Prototype in Prototypes:
-            plt.scatter(Prototype[0], Prototype[1], marker="*", s=400)
+    if len(ValidationHandler.Samples) > len(MaterialColours):
+        raise ValueError(f"Only {len(MaterialColours)} materials can be told apart reliably in one PCA plot, got {len(ValidationHandler.Samples)}")
+    SampleColour = {Sample: MaterialColours[Index] for Index, Sample in enumerate(ValidationHandler.Samples)}
+    ClassMarker  = {}
+    for Class in ValidationHandler.Classes:
+        ClassMarker[Class] = StateMarkers.get(Class, FallbackMarkers[len(ClassMarker) % len(FallbackMarkers)])
 
-    plt.legend()
-    plt.legend(prop={"size":15})
-    plt.savefig(f"{Controls.OutputPath}/{Name}.png")
+    Figure, Axis = plt.subplots(figsize=(12, 8))
+    Axis.set_title(Title, fontsize=18, color=TextColour)
+    Axis.set_xlabel(f"PC1 ({100*ValidationHandler.PreparedData["ExplainedVarianceRatio"][0]:.2f}% of original variance)", fontsize=14, color=TextColour)
+    Axis.set_ylabel(f"PC2 ({100*ValidationHandler.PreparedData["ExplainedVarianceRatio"][1]:.2f}% of original variance)", fontsize=14, color=TextColour)
+    Axis.grid(True, color=GridColour, linewidth=0.8)
+    Axis.set_axisbelow(True)
+    for Spine in Axis.spines.values():
+        Spine.set_color("#b0b0b0")
+    Axis.tick_params(colors="#555555")
+
+    Labels = np.array(ValidationHandler.PreparedData["Labels"])
+    for Sample in ValidationHandler.Samples:
+        for Class in ValidationHandler.Classes:
+            Mask = Labels == f"{Sample}_{Class}"
+            Axis.scatter(Data[Mask, 0], Data[Mask, 1], s=40, c=SampleColour[Sample], marker=ClassMarker[Class], alpha=0.75, edgecolors="white", linewidths=0.6, zorder=2)
+
+    # Prototypes are ordered by the label map, so the look up table gives the class of each prototype
+    for Index, Prototype in enumerate(Prototypes):
+        Sample, Class = ValidationHandler.LookUpTable[Index].split("_", 1)
+        Axis.scatter(Prototype[0], Prototype[1], s=200, c=SampleColour[Sample], marker=ClassMarker[Class], edgecolors=TextColour, linewidths=1, zorder=3)
+
+    # Two separate legends, one per encoding, placed outside of the data area
+    MaterialHandles = [Line2D([], [], marker="s", linestyle="", markersize=11, markerfacecolor=SampleColour[Sample], markeredgecolor="white", label=Sample) for Sample in ValidationHandler.Samples]
+    StateHandles    = [Line2D([], [], marker=ClassMarker[Class], linestyle="", markersize=10, markerfacecolor="#8a8a8a", markeredgecolor="white", label=Class) for Class in ValidationHandler.Classes]
+    StateHandles.append(Line2D([], [], marker="o", linestyle="", markersize=np.sqrt(200), markerfacecolor="#8a8a8a", markeredgecolor=TextColour, markeredgewidth=1, label="Class prototype"))
+    MaterialLegend = Axis.legend(handles=MaterialHandles, title="Material", loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour)
+    Axis.add_artist(MaterialLegend)
+    Axis.legend(handles=StateHandles, title="Surface state", loc="upper left", bbox_to_anchor=(1.02, 0.62), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour, labelspacing=1.0)
+
+    Figure.tight_layout()
+    Figure.savefig(f"{Controls.OutputPath}/{Name}.png", dpi=300, bbox_inches="tight")
+    plt.close(Figure)

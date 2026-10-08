@@ -64,7 +64,9 @@ def NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler):
 def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ValidationHandler.ExtractData(LogFile, Controls, "Testing")
     ViewDimension = ValidationHandler.PreparedData["FeatureTensor"].shape[0] * ValidationHandler.PreparedData["FeatureTensor"].shape[1]
-    ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(ViewDimension, 768))
+    Network.Encoder.eval() # BatchNorm uses the running statistics from training instead of the statistics of the test data
+    with torch.no_grad():
+        ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(ViewDimension, 768))
 
     DistanceMatrix     = NN.EuclideanDistance(ValidationHandler.PreparedData["Embeddings"], Network.Prototypes)
     ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)
@@ -85,13 +87,13 @@ def PrincipalComponentAnalysis(LogFile, Controls, ValidationHandler, NumberOfCom
     Pca.fit(ReshapedFeatureTensor)
 
     ValidationHandler.PreparedData["TransformedFeatureTensor"] = Pca.transform(ReshapedFeatureTensor)
-    ValidationHandler.PreparedData["FeatureInformationLoss"]   = Pca.explained_variance_ratio_
-    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, ValidationHandler.PreparedData["TransformedFeatureTensor"], "PCA_DinoFeatures")
+    ValidationHandler.PreparedData["ExplainedVarianceRatio"]   = Pca.explained_variance_ratio_
+    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, ValidationHandler.PreparedData["TransformedFeatureTensor"], "PCA_DinoFeatures", Title="PCA of the DINO features (test set)")
 
     Pca = PCA(n_components=NumberOfComponents)
     ReshapedEmbeddings = ValidationHandler.PreparedData["Embeddings"].detach().cpu().numpy()
     Pca.fit(ReshapedEmbeddings)
     ValidationHandler.PreparedData["TransformedEmbeddings"]  = Pca.transform(ReshapedEmbeddings)
-    ValidationHandler.PreparedData["FeatureInformationLoss"] = Pca.explained_variance_ratio_
+    ValidationHandler.PreparedData["ExplainedVarianceRatio"] = Pca.explained_variance_ratio_
     TransformedPrototypes  = Pca.transform(ValidationHandler.Prototypes.detach().cpu().numpy())
-    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, ValidationHandler.PreparedData["TransformedEmbeddings"], "PCA_Embeddings", TransformedPrototypes)
+    LOG.PlotPrincipalComponentAnalysis(Controls, ValidationHandler, ValidationHandler.PreparedData["TransformedEmbeddings"], "PCA_Embeddings", TransformedPrototypes, Title="PCA of the embeddings (test set) with class prototypes")
