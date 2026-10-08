@@ -8,7 +8,7 @@ from torch.autograd import Variable
 
 import math
 
-from . import AuxiallryCode as AUX
+from . import AuxiliaryCode as AUX
 from . import Logging as LOG
 
 class DINOv2Model():

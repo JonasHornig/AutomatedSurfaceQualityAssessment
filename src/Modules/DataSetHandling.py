@@ -4,7 +4,7 @@ import torch
 
 from PIL import Image
 
-from . import AuxiallryCode as AUX
+from . import AuxiliaryCode as AUX
 from . import Logging as LOG
 
 class DataSet():
