@@ -66,7 +66,9 @@ class DataSet():
         self.DataSetPath = Controls.DataSetPath
         self.DataSetName = Controls.DataSet
 
-        self.HdfFiles = [Entry for Entry in os.listdir(self.DataSetPath) if Entry.endswith(f"_{Controls.FeatureExtractor}Features.h5") and Entry.startswith(self.DataSetName + "_")]
+        # All directory listings are sorted. os.listdir has no defined order (alphabetical on Windows, arbitrary on Linux),
+        # and the order of samples and classes determines the label map and the classes drawn for each episode.
+        self.HdfFiles = [Entry for Entry in sorted(os.listdir(self.DataSetPath)) if Entry.endswith(f"_{Controls.FeatureExtractor}Features.h5") and Entry.startswith(self.DataSetName + "_")]
 
         if ForceLoadImages:
             self.LoadDataSetImages(LogFile, WriteDetailedDebugInfo=Controls.WriteDetailedDebugInfo)
@@ -130,24 +132,24 @@ class DataSet():
         BasePath = f"{self.DataSetPath}/Images"
 
         if not Samples:
-            self.Samples = [Entry for Entry in os.listdir(BasePath) if os.path.isdir(os.path.join(BasePath, Entry))]
+            self.Samples = [Entry for Entry in sorted(os.listdir(BasePath)) if os.path.isdir(os.path.join(BasePath, Entry))]
         else:
             self.Samples = Samples
         for Sample in self.Samples:
             AUX.AppendDictionary(self.Images, Sample, "dict")
             SamplePath = f"{BasePath}/{Sample}"
 
-            self.Classes = [Entry for Entry in os.listdir(SamplePath) if os.path.isdir(os.path.join(SamplePath, Entry))]
+            self.Classes = [Entry for Entry in sorted(os.listdir(SamplePath)) if os.path.isdir(os.path.join(SamplePath, Entry))]
             for Class in self.Classes:
                 AUX.AppendDictionary(self.Images[Sample], Class, "dict")
                 ClassPath = f"{SamplePath}/{Class}"
 
-                self.Modes = [Entry for Entry in os.listdir(ClassPath) if os.path.isdir(os.path.join(ClassPath, Entry))]
+                self.Modes = [Entry for Entry in sorted(os.listdir(ClassPath)) if os.path.isdir(os.path.join(ClassPath, Entry))]
                 for Mode in self.Modes:
                     AUX.AppendDictionary(self.Images[Sample][Class], Mode, "dict")
                     ModePath = f"{ClassPath}/{Mode}"
 
-                    ImageNames = [Entry for Entry in os.listdir(ModePath) if Entry.endswith(".tif")]
+                    ImageNames = [Entry for Entry in sorted(os.listdir(ModePath)) if Entry.endswith(".tif")]
                     AUX.AppendDictionary(self.Images[Sample][Class][Mode], "Images", "list")
                     AUX.AppendDictionary(self.Images[Sample][Class][Mode], "Names" , "list")
                     for ImageName in ImageNames:

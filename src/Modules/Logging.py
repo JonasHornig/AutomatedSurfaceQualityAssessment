@@ -152,11 +152,12 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
         Log.W(f"Validation accuracy mean               : {ValAccMean:.3f} %")
         Log.W(f"Validation accuracy standard deviation : {ValAccStandardDeviation:.3f} percentage points")
 
-    with open(f"{Controls.OutputPath}TrainingProcess.csv", "w") as TrainingProcessCsv:
+    with open(f"{Controls.OutputPath}/TrainingProcess.csv", "w") as TrainingProcessCsv:
         # Accuracies in %. Training accuracy is measured on the query samples, validation accuracy on the held back validation images
-        TrainingProcessCsv.write("Episode Index,      Loss, Training Accuracy, Validation Accuracy\n")
+        # Plain comma separated values without padding, so the file can be read directly by e.g. pandas or Excel
+        TrainingProcessCsv.write("Episode,Loss,TrainingAccuracyPercent,ValidationAccuracyPercent\n")
         for Index, _ in enumerate(RunningAccuracy):
-            TrainingProcessCsv.write(f"{Index+1:>13}, {RunningLoss[Index]:>9.6f}, {100*RunningAccuracy[Index]:>17.3f}, {100*RunningValidationAccuracy[Index]:>19.3f}\n")
+            TrainingProcessCsv.write(f"{Index+1},{RunningLoss[Index]:.6f},{100*RunningAccuracy[Index]:.3f},{100*RunningValidationAccuracy[Index]:.3f}\n")
 
     # Define plot
     Figure, LossAxis = plt.subplots(figsize=(12,5))

@@ -3,11 +3,13 @@ StartTime = time.time()
 
 import torch
 import os
+import json
 import random
 import numpy as np
 
 from tqdm import tqdm
-from dataclasses import dataclass, field
+from datetime import datetime
+from dataclasses import dataclass, field, asdict
 
 import Modules.DataSetHandling as DATA
 import Modules.NeuralNetwork as NN
@@ -37,17 +39,27 @@ class ControlVariables:
     NumberOfQuerySamplesPerClass   : int   = 1     # N_Q
     ValidationFraction             : float = 0.25  # Fraction of the training images of each class held back for validation, never used for support or query samples
 
+    # Outputs
+    RunName : str = "" # Name of the output folder Outputs/<RunName>/. Empty: date and time of the start of the run, so runs never overwrite each other
+
     # Flags
     #  --  True  --  False  --
     WriteDetailedDebugInfo : bool = True
-    
+
     # Parameter initialisation
     NumberOfClasses : int = 0 # K
-    
+
     def __post_init__(self):
         BaseDirectory = os.path.dirname(os.path.abspath(__file__))
+        if not self.RunName:
+            self.RunName = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.DataSetPath = f"{BaseDirectory}/DataSets/{self.DataSet}"
-        self.OutputPath : str   = f"{BaseDirectory}/Outputs/"
+        self.OutputPath : str   = f"{BaseDirectory}/Outputs/{self.RunName}"
+
+    def Save(self):
+        # All settings of the run are saved next to its results, so every run can be reproduced
+        with open(f"{self.OutputPath}/Settings.json", "w") as SettingsFile:
+            json.dump(asdict(self), SettingsFile, indent=4)
 
 def SetSeed(Seed: int):
     # Episode sampling uses Python's random module and torch, the weight initialisation uses torch
@@ -60,7 +72,10 @@ def Main():
     SetSeed(Controls.Seed)
     print("")
     LogFile = LOG.NoteFile(f"{Controls.OutputPath}/Training.log")
+    Controls.Save()
+    print(f"Writing results to {Controls.OutputPath}")
     LogFile.W("\n****************************\n*  Training the Proto Net  *\n****************************")
+    LogFile.W(f"Run name: {Controls.RunName} - all settings are saved in Settings.json")
     DataSet = DATA.DataSet()
     DataSet.LoadDataSet(LogFile, Controls) # Stops with an error if the features have not been extracted with PreprocessImages.py yet
 

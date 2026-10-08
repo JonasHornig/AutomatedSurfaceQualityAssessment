@@ -11,12 +11,16 @@ import math
 from . import AuxiliaryCode as AUX
 from . import Logging as LOG
 
+# The DINOv3 model code is loaded from GitHub through torch.hub. It is pinned to a fixed commit,
+# so later changes to the DINOv3 repository can't change the extracted features.
+DINOV3_HUB_REPOSITORY = "facebookresearch/dinov3:6876159a11b4df116f30f667f8c9888617df0751"
+
 class DINOv3Model():
     def __init__(self, WeightsPath: str):
         self.Preprocessor = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # normalizing images the same way the DINOv3 (LVD-1689M) training images were normalized
-        self.Model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vitb16', weights=WeightsPath)
+        self.Model = torch.hub.load(DINOV3_HUB_REPOSITORY, 'dinov3_vitb16', weights=WeightsPath)
         self.LoadModel()
 
     def LoadModel(self):
@@ -201,7 +205,7 @@ class ProtoNet():
         # The prototypes are ordered by the label map, which is saved separately as Labelmap.json
         torch.save(self.Encoder.state_dict(), f"{OutputPath}/TrainedProtoNet.pth")
         torch.save(self.Prototypes, f"{OutputPath}/PrototypeEmbedding.pth")
-        Log.W(f"\nSaved the encoder weights to {OutputPath}TrainedProtoNet.pth and the prototypes {list(self.Prototypes.shape)} to {OutputPath}PrototypeEmbedding.pth")
+        Log.W(f"\nSaved the encoder weights to {OutputPath}/TrainedProtoNet.pth and the prototypes {list(self.Prototypes.shape)} to {OutputPath}/PrototypeEmbedding.pth")
 
     def ApplyNetwork(self):
         return

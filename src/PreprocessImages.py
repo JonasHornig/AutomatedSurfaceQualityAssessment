@@ -41,7 +41,7 @@ class ControlVariables:
         # Paths are resolved from the location of this script, so it can be run from any working directory
         BaseDirectory        = os.path.dirname(os.path.abspath(__file__))
         self.DataSetPath     = f"{BaseDirectory}/DataSets/{self.DataSet}"
-        self.OutputPath      = f"{BaseDirectory}/Outputs/"
+        self.OutputPath      = f"{BaseDirectory}/Outputs"
         self.DinoWeightsPath = f"{BaseDirectory}/Models/{self.DinoWeightsName}"
 
 def Main(LogFile):
@@ -49,7 +49,7 @@ def Main(LogFile):
 
     Controls  = ControlVariables()
     DinoModel = NN.DINOv3Model(Controls.DinoWeightsPath)
-    MetaData  = {"FeatureExtractor": "dinov3_vitb16", "Weights": Controls.DinoWeightsName}
+    MetaData  = {"FeatureExtractor": "dinov3_vitb16", "Weights": Controls.DinoWeightsName, "HubRepository": NN.DINOV3_HUB_REPOSITORY}
     LogFile.W("\nLoading DINOv3 model complete.")
 
     if Controls.ProcessAllImages:
