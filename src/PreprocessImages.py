@@ -20,6 +20,10 @@ class ControlVariables:
     DataSet : str       = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
     Samples : list[str] = field(default_factory=lambda: [])
 
+    # Feature extractor
+    FeatureExtractor : str = "DINOv3"
+    DinoWeightsName  : str = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth" # located in <Repository>/Models/
+
     # Flags
     #  --  True  --  False  --
     WriteDetailedDebugInfo : bool = True
@@ -35,14 +39,16 @@ class ControlVariables:
 
     def __post_init__(self):
         self.DataSetPath = f"DataSets/{self.DataSet}"
+        RepositoryDirectory  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.DinoWeightsPath = f"{RepositoryDirectory}/Models/{self.DinoWeightsName}"
 
 def Main(LogFile):
-    LogFile.W("\n*****************************\n*  Data set pre-processing  *\n*       using DINOv2        *\n*****************************")
+    LogFile.W("\n*****************************\n*  Data set pre-processing  *\n*       using DINOv3        *\n*****************************")
 
     Controls  = ControlVariables()
-    DinoModel = NN.DINOv2Model()
-    MetaData  = {}
-    LogFile.W("\nLoading DINOv2 model complete.")
+    DinoModel = NN.DINOv3Model(Controls.DinoWeightsPath)
+    MetaData  = {"FeatureExtractor": "dinov3_vitb16", "Weights": Controls.DinoWeightsName}
+    LogFile.W("\nLoading DINOv3 model complete.")
 
     if Controls.ProcessAllImages:
         Samples = [Entry for Entry in os.listdir(Controls.DataSetPath) if os.path.isdir(os.path.join(Controls.DataSetPath, Entry))]
@@ -58,18 +64,21 @@ def Main(LogFile):
             for Class in DataSet.Images[Sample]:
                 for Mode in DataSet.Images[Sample][Class]:
                     LogFile.W(f"{Sample}, {Class}, {Mode}, ", NewLine=False)
-                    #Images = [DataSet.ValidateImageSize(Image.open(ImagePath)) for ImagePath in DataSet.Images[Sample][Class][Mode]["Names"]]
                     DataSet.Images[Sample][Class][Mode]["Images"] = []
                     for ImagePath in DataSet.Images[Sample][Class][Mode]["Names"]:
-                        PilImage       = Image.open(f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{ImagePath}")
-                        ValidatedImage = DataSet.ValidateImageSize(PilImage)
+                        with Image.open(f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{ImagePath}") as PilImage:
+                            ValidatedImage = DataSet.ValidateImage(PilImage, ImagePath, LogFile)
                         DataSet.Images[Sample][Class][Mode]["Images"].append(ValidatedImage)
                     DinoModel.ApplyNetwork(DataSet.Images[Sample][Class][Mode], LogFile, ProgressBar, Controls.WriteDetailedDebugInfo)
                     for PilImage in DataSet.Images[Sample][Class][Mode]["Images"]:
                         PilImage.close()
 
+    if DataSet.NumberOfResizedImages > 0:
+        LogFile.W(f"\nWARNING! - {DataSet.NumberOfResizedImages} images did not match the target size {Controls.TargetImageSize} and were resized. Check the tiling.")
+        print(f"WARNING! - {DataSet.NumberOfResizedImages} images were resized. See log file.")
+
     for Sample in DataSet.Images:
-        with h5py.File(f"{Controls.DataSetPath}/{Controls.DataSet}_{Sample}_DINOv2Features.h5", "w") as HdfFile:
+        with h5py.File(f"{Controls.DataSetPath}/{Controls.DataSet}_{Sample}_{Controls.FeatureExtractor}Features.h5", "w") as HdfFile:
             for Class in DataSet.Images[Sample]:
                 for Mode in DataSet.Images[Sample][Class]:
                     HdfFile.create_dataset(f"{Class}/{Mode}/Names"       , data = DataSet.Images[Sample][Class][Mode]["Names"])

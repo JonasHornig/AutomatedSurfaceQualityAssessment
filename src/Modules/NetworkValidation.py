@@ -23,7 +23,7 @@ class ValidationHandler():
         self.CombinedClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
 
     def ExtractData(self, LogFile, Controls, Mode="Testing"):
-        # Generate training tensors with the shape [NC, NS, DINOv2 Feature dimension]
+        # Generate training tensors with the shape [NC, NS, DINO feature dimension]
         self.PreparedData = {"MasterIndices": [], "Names": [], "Labels": [], "LabelIndices": [], "FeatureTensor": torch.empty((1, 1), dtype=torch.float32)}
         if Controls.WriteDetailedDebugInfo:
             LogFile.W("\nExtracting data from Data set for the test application")

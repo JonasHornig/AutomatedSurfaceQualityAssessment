@@ -11,12 +11,13 @@ import math
 from . import AuxiliaryCode as AUX
 from . import Logging as LOG
 
-class DINOv2Model():
-    def __init__(self):
+class DINOv3Model():
+    def __init__(self, WeightsPath: str):
         self.Preprocessor = transforms.Compose([
-            transforms.ToTensor()                                                           ,
-            transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # normalizing images the same way the DINO training images were normalized
-        self.Model = torch.hub.load('facebookresearch/dino:main', 'dino_vitb16')
+            transforms.ToTensor(),
+            transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # normalizing images the same way the DINOv3 (LVD-1689M) training images were normalized
+        # DINOv3 weights are gated - request access at ai.meta.com/resources/models-and-libraries/dinov3-downloads/ and download the ViT-B/16 checkpoint
+        self.Model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vitb16', weights=WeightsPath)
         self.LoadModel()
 
     def LoadModel(self):
@@ -88,14 +89,18 @@ class ProtoNet():
                 nn.BatchNorm1d(OutputDimension)            ,
                 nn.LeakyReLU()                             )
     
-        NumberOfLayers = self.NumberOfHiddenLayers + 2
+        # The input layer is the DINOv3 feature vector itself. It is followed by NumberOfHiddenLayers hidden blocks (Linear, BatchNorm, LeakyReLU)
+        # and a purely linear output layer projecting into the embedding space, so the embedding distances are not distorted by an activation.
+        # Dimensions: Feature -> NumberOfHiddenLayers hidden widths -> Embedding
+        NumberOfLayers = self.NumberOfHiddenLayers + 1
         Indices    = np.arange(0, NumberOfLayers+1, 1)
         Fraction   = (np.exp(-self.Gamma * Indices) - np.exp(-self.Gamma * NumberOfLayers)) / (1 - np.exp(-self.Gamma * NumberOfLayers))
         Dimensions = (self.EmbeddingDimension + (self.FeatureDimension-self.EmbeddingDimension)*Fraction).astype(int)
 
         MlpLayers = []
-        for Index, _ in enumerate(Dimensions[:-1]):
+        for Index in range(self.NumberOfHiddenLayers):
             MlpLayers.append(MlpBlock(Dimensions[Index], Dimensions[Index+1]))
+        MlpLayers.append(nn.Linear(Dimensions[-2], Dimensions[-1]))
 
         LOG.GenerateEncoder(Log, self.FeatureDimension, self.EmbeddingDimension, self.NumberOfHiddenLayers, self.Gamma, Indices, Dimensions)
         return nn.Sequential(*MlpLayers)
@@ -120,7 +125,7 @@ class ProtoNet():
             TargetIndices = TargetIndices.cuda()
 
         #Reshape dimensions to fit the network/embedding function:
-        #768 is the DINOv2 Output dimension
+        #768 is the DINOv3 ViT-B/16 Output dimension
         #NumberOfClasses, NumberOfSamples, 768 --> NumberOfClasses * NumberOfSamples, 768
         ReshapedPreprocessedSupportTensor  = PreprocessedSupportTensor.view(  NumberOfClasses * NumberOfSupportSamples  , *PreprocessedSupportTensor.size()[2:])
         ReshapedPreprocessedQueryTensor    = PreprocessedQueryTensor.view(    NumberOfClasses * NumberOfQuerySamples    , *PreprocessedQueryTensor.size()[2:])
@@ -170,17 +175,15 @@ class CompleteNetwork:
         self.LookUpTable = {self.LabelMap[Class]: Class for Class in self.LabelMap.keys()}
 
         self.Transform       = self.GenerateTensor()
-        self.PretrainedNet   = self.GetDINOv2()
+        self.PretrainedNet   = self.GetDINOv3(self.Settings.DinoWeightsPath)
         self.TrainedProtoNet = self.GetProtoNet()
 
     @staticmethod
-    def GetDINOv2():
+    def GetDINOv3(WeightsPath):
         Preprocessor = transforms.Compose([
-            transforms.CenterCrop( 224                                                  ) ,
-            transforms.Resize(     256, interpolation=InterpolationMode.BILINEAR        ) ,
-            transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ])
+            transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # Tiles are already 224 x 224, no cropping or resizing
 
-        Features = torch.hub.load('facebookresearch/dino:main', 'dino_vitb16')
+        Features = torch.hub.load('facebookresearch/dinov3', 'dinov3_vitb16', weights=WeightsPath)
         return [Features.eval(), Preprocessor]
 
     def GetProtoNet(self):

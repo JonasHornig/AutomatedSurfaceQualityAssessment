@@ -43,7 +43,7 @@ class EpisodeLoader():
         if not self.Images:
             raise Exception("No data set available. Load data set before creating episodes.")
 
-        # Generate training tensors with the shape [NC, NS, DINOv2 Feature dimension]
+        # Generate training tensors with the shape [NC, NS, DINO feature dimension]
         SelectedClasses = random.sample(self.CombinedClasses, self.NumberOfClassesPerEpisode)
         Episode = {}
         SupportTensors    = []

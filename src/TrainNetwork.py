@@ -20,6 +20,7 @@ class ControlVariables:
     # Inputs
     Modes      : tuple = ("Training", "Testing")
     DataSet    : str   = "SmallDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
+    FeatureExtractor : str = "DINOv3"   #  --  DINOv3  --  DINOv2 (legacy files, actually DINOv1 ViT-B/16 features)
 
     FeatureDimension     : int   = 768
     EmbeddingDimension   : int   = 5

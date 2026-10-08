@@ -38,11 +38,21 @@ class DataSet():
         self.DataSetPath : str  = ""
         self.DataSetName : str  = ""
         self.TotalNumberOfImages    : int = 0
+        self.NumberOfResizedImages  : int = 0
 
-    def ValidateImageSize(self, Image: Image.Image) -> Image.Image:
-        if Image.size != self.TargetImageSize:
-            Image = Image.resize(self.TargetImageSize)
-        return Image
+    def ValidateImage(self, Image: Image.Image, ImageName: str, LogFile) -> Image.Image:
+        # DINOv3 expects 3 channel RGB input. convert() always returns a copy, so the opened file can be closed afterwards.
+        ValidatedImage = Image.convert("RGB")
+
+        # Tiles are cut from the microscope images at full resolution and should already match the target size.
+        # A mismatch indicates a tiling error, as resizing would blur the scratches the network is supposed to detect.
+        if ValidatedImage.size != self.TargetImageSize:
+            Message = f"WARNING! - Image {ImageName} has size {ValidatedImage.size} instead of {self.TargetImageSize}. Resizing it."
+            print(Message)
+            LogFile.W(Message)
+            self.NumberOfResizedImages += 1
+            ValidatedImage = ValidatedImage.resize(self.TargetImageSize)
+        return ValidatedImage
 
     def LoadDataSet(self, LogFile, Controls, ForceLoadImages: bool = False):
         # Assumes that the data set is balanced, meaning the same classes and modes for each input sample.
@@ -56,7 +66,7 @@ class DataSet():
         self.DataSetPath = Controls.DataSetPath
         self.DataSetName = Controls.DataSet
 
-        self.HdfFiles = [Entry for Entry in os.listdir(self.DataSetPath) if Entry.endswith(".h5") and Entry.startswith(self.DataSetName + "_")]
+        self.HdfFiles = [Entry for Entry in os.listdir(self.DataSetPath) if Entry.endswith(f"_{Controls.FeatureExtractor}Features.h5") and Entry.startswith(self.DataSetName + "_")]
 
         if self.HdfFiles and not ForceLoadImages:
             self.LoadDataSetFromHdfFile(LogFile, WriteDetailedDebugInfo=Controls.WriteDetailedDebugInfo)
@@ -133,7 +143,7 @@ class DataSet():
                         ImagePath      = f"{ModePath}/{ImageName}"
                         '''
                         PilImage       = Image.open(ImagePath)
-                        ValidatedImage = self.ValidateImageSize(PilImage)
+                        ValidatedImage = self.ValidateImage(PilImage, ImageName, LogFile)
                         self.Images[Sample][Class][Mode]["Images"].append(ValidatedImage)
                         '''
                         self.Images[Sample][Class][Mode]["Names"].append(ImageName)

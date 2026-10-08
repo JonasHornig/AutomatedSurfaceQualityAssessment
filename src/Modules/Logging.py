@@ -37,7 +37,7 @@ def LogDict(Log, Dictionary: dict, Indent: int = 0):
             Log.W(f"{Prefix}{Key}: {str(Value)[:50]}")
 
 def LogHdf5Write(Log, Controls, HdfFile):
-    Log.W(f"\nHDF5 File created as Outputs/{Controls.DataSet}_DINOv2Features.h5")
+    Log.W(f"\nHDF5 File created as {HdfFile.filename}")
     Log.W(f"Meta data:")
     for Key, Value in HdfFile["MetaData"].attrs.items():
         Log.W(f"    {Key}: {Value}")
