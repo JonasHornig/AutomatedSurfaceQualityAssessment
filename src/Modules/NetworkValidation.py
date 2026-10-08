@@ -27,9 +27,6 @@ class ValidationHandler():
         # The classes are concatenated instead of stacked, so they can contain different numbers of images.
         # Row i of the tensor belongs to entry i of MasterIndices, Names, Labels and LabelIndices.
         self.PreparedData = {"MasterIndices": [], "Names": [], "Labels": [], "LabelIndices": [], "FeatureTensor": torch.empty((1, 1), dtype=torch.float32)}
-        if Controls.WriteDetailedDebugInfo:
-            LogFile.W("\nExtracting data from Data set for the test application")
-            LogFile.W("Read data:\nIndex Name                                               Label                Index Tensor")
         RunningIndex = 0
         ClassTensors = []
         for Sample in self.Samples:
@@ -46,15 +43,12 @@ class ValidationHandler():
                     self.PreparedData["Names"].append(ActiveName)
                     self.PreparedData["Labels"].append(Label)
                     self.PreparedData["LabelIndices"].append(LabelIndex)
-
-                    if Controls.WriteDetailedDebugInfo:
-                        LOG.DataExtraction_One(LogFile, ActiveName, ActiveFeatureTensor,Label, LabelIndex, RunningIndex)
                     RunningIndex += 1
                 ClassTensors.append(torch.stack(Features))
 
         self.PreparedData["FeatureTensor"] = torch.cat(ClassTensors, dim=0)
         if Controls.WriteDetailedDebugInfo:
-            LOG.DataExtraction_Two(LogFile, self.PreparedData, self.Samples, self.Classes)
+            LOG.DataExtraction(LogFile, self.PreparedData)
         self.DataPrepared = True
 
 def NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler):

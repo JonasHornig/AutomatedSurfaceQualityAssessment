@@ -129,11 +129,11 @@ class ProtoNet():
         #Connect to NumberOfClasses * NumberOfSupportSamples + NumberOfClasses * NumberOfSupportSamples, 768
         InputTensor = torch.cat([ReshapedPreprocessedSupportTensor, ReshapedPreprocessedQueryTensor], 0)
 
-        self.OutputTensor     = self.Encoder.forward( InputTensor                        )
+        OutputTensor = self.Encoder.forward(InputTensor)
 
-        OutputDimensions = self.OutputTensor.size(-1)
-        QueryEmbeddings = self.OutputTensor[NumberOfClasses * NumberOfSupportSamples:]
-        EpisodePrototypes = self.OutputTensor[:NumberOfClasses * NumberOfSupportSamples].view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
+        OutputDimensions = OutputTensor.size(-1)
+        QueryEmbeddings = OutputTensor[NumberOfClasses * NumberOfSupportSamples:]
+        EpisodePrototypes = OutputTensor[:NumberOfClasses * NumberOfSupportSamples].view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
 
         '''
         log_softmax = (z_i) = log(e^(z_i)/sum(e^(z_j))) = z_i - log(sum(e^(z_j)))
@@ -155,10 +155,10 @@ class ProtoNet():
         self.Encoder.eval()
         with torch.no_grad():
             ValidationPrototypes  = self.Encoder.forward(ReshapedPreprocessedSupportTensor).view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
-            self.ValidationOutput = self.Encoder.forward(ValidationTensor)
+            ValidationOutput      = self.Encoder.forward(ValidationTensor)
         self.Encoder.train()
 
-        ValidationDistanceMatrix = EuclideanDistance(self.ValidationOutput, ValidationPrototypes)
+        ValidationDistanceMatrix = EuclideanDistance(ValidationOutput, ValidationPrototypes)
         _, ValidationResultLabel = ValidationDistanceMatrix.min(1)
         ValidationAccuracy       = torch.eq(ValidationResultLabel, ValidationLabels).float().mean()
 

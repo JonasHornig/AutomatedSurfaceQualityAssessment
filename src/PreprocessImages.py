@@ -61,7 +61,7 @@ def Main(LogFile):
     DataSet.LoadDataSet(LogFile, Controls, ForceLoadImages=True)
 
     LogFile.W("\nProcessing images")
-    with tqdm(total=DataSet.NumberOfImages, desc=f"Extracting features", unit=" img") as ProgressBar:
+    with tqdm(total=DataSet.TotalNumberOfImages, desc=f"Extracting features", unit=" img") as ProgressBar:
         for Sample in DataSet.Images:
             for Class in DataSet.Images[Sample]:
                 for Mode in DataSet.Images[Sample][Class]:

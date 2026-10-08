@@ -19,7 +19,7 @@ import Modules.NetworkValidation as VAL
 class ControlVariables:
     # Inputs
     Modes      : tuple = ("Training", "Testing")
-    DataSet    : str   = "SmallDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
+    DataSet    : str   = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
     FeatureExtractor : str = "DINOv3"   #  --  DINOv3  --  legacy was DINOv1 ViT-B/16
 
     FeatureDimension     : int   = 768
@@ -30,8 +30,8 @@ class ControlVariables:
     NumberOfEpisodes               : int   = 500
     LearningRate                   : float = 1e-4
     WeightDecay                    : float = 1e-2  # AdamW weight decay (1e-2 is the PyTorch default)
-    UseLearningRateScheduler       : bool  = False # Cosine annealing of the learning rate from LearningRate to 0 over NumberOfEpisodes
-    Seed                           : int   = 1     # Seed for all random number generators, makes training runs reproducible
+    UseLearningRateScheduler       : bool  = False # Cosine annealing of the learning rate from LearningRate to 0 over NumberOfEpisodes. (slightly worse results than a constant learning rate, but the final validation accuracy is more stable)
+    Seed                           : int   = 333     # Seed for all random number generators, makes training runs reproducible
     NumberOfClassesPerEpisode      : int   = 6     # N_C =< K
     NumberOfSupportSamplesPerClass : int   = 9     # N_S
     NumberOfQuerySamplesPerClass   : int   = 1     # N_Q
@@ -70,7 +70,7 @@ def Main():
 
     EpisodeLoader = EPH.EpisodeLoader(DataSet.Images, DataSet.GetParameters(), Controls)
     LOG.Training(Controls, EpisodeLoader, LogFile)
-    LOG.ValidationSplit(LogFile, EpisodeLoader)
+    LOG.ValidationSplit(LogFile, EpisodeLoader, Controls.WriteDetailedDebugInfo)
     EpisodeLoader.GenerateLabelMap(Controls.OutputPath)
     LOG.WritelabelMap(LogFile, EpisodeLoader.LabelMap)
 

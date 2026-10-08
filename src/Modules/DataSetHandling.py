@@ -128,7 +128,6 @@ class DataSet():
 
     def LoadDataSetImages(self, LogFile, Samples: list = [], WriteDetailedDebugInfo: bool = True):
         BasePath = f"{self.DataSetPath}/Images"
-        self.NumberOfImages = 0
 
         if not Samples:
             self.Samples = [Entry for Entry in os.listdir(BasePath) if os.path.isdir(os.path.join(BasePath, Entry))]
@@ -159,7 +158,7 @@ class DataSet():
                         self.Images[Sample][Class][Mode]["Images"].append(ValidatedImage)
                         '''
                         self.Images[Sample][Class][Mode]["Names"].append(ImageName)
-                    self.NumberOfImages += len(ImageNames)
+                    self.TotalNumberOfImages += len(ImageNames)
                 
                     LogFile.W(f"| {Class:<10} | {Sample:<10} | {Mode:<10} | {str(len(ImageNames)):<10} |")
         LogFile.W("*---------------------------------------------------*")

@@ -97,7 +97,7 @@ def Training(Controls, EpisodeLoader, Log):
     Log.W(f"| Validation Fraction                 |          | {Controls.ValidationFraction:<10} |")
     Log.W("*-------------------------------------------------------------*")
 
-def ValidationSplit(Log, EpisodeLoader):
+def ValidationSplit(Log, EpisodeLoader, DetailedLog: bool = False):
     Log.W("\nHeld back validation images (never used as support or query samples)")
     Log.W("*-------------------------------------------------*")
     Log.W("| Class                | Training   | Validation  |")
@@ -105,6 +105,10 @@ def ValidationSplit(Log, EpisodeLoader):
     for Class in EpisodeLoader.CombinedClasses:
         Log.W(f"| {Class:<20} | {len(EpisodeLoader.TrainingIndices[Class]):<10} | {len(EpisodeLoader.ValidationIndices[Class]):<11} |")
     Log.W("*-------------------------------------------------*")
+    if DetailedLog:
+        Log.W("Validation image indices within each class:")
+        for Class in EpisodeLoader.CombinedClasses:
+            Log.W(f"  {Class:<20} : {sorted(EpisodeLoader.ValidationIndices[Class].tolist())}")
 
 def WritelabelMap(Log, LabelMap):
     Log.W("\n*------------------------------*")
@@ -114,12 +118,12 @@ def WritelabelMap(Log, LabelMap):
         Log.W(f"| {Class:<20} | {LabelMap[Class]:<5} |")
     Log.W("*------------------------------*")
 
-def TrainingEpisode(Log, Controls, SelectedClasses, SupportIndices, QueryIndices, ValidationIndices, Episode):
-    Log.W(f"  Selected classes   : {SelectedClasses}")
-    Log.W(f"  Support indices    : {SupportIndices}")
-    Log.W(f"  Query indices      : {QueryIndices}")
-    Log.W(f"  Validation indices : {ValidationIndices} (fixed, held back)")
-    
+def TrainingEpisode(Log, EpisodeIndices, Episode):
+    # Image indices within each selected class, in episode order. The validation images are fixed and listed in the validation split.
+    Log.W(f"  Class                | Support indices | Query indices")
+    for Class, (SupportIndices, QueryIndices) in EpisodeIndices.items():
+        Log.W(f"  {Class:<20} | {SupportIndices} | {QueryIndices}")
+
     Log.W(f"\n  Tensor shapes:")
     Log.W(f"  Support tensor   : [{Episode["SupportTensor"].size(0):>3}, {Episode["SupportTensor"].size(1):>3}, {Episode["SupportTensor"].size(2):>4}]")
     Log.W(f"  Query tensor     : [{Episode["QueryTensor"].size(0):>3}, {Episode["QueryTensor"].size(1):>3}, {Episode["QueryTensor"].size(2):>4}]")
@@ -127,7 +131,7 @@ def TrainingEpisode(Log, Controls, SelectedClasses, SupportIndices, QueryIndices
 
 def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy):
     NumberOfEpisodes = len(RunningAccuracy)
-    Episodes = [Episode for Episode in range(NumberOfEpisodes)]
+    Episodes = list(range(1, NumberOfEpisodes + 1)) # 1-based, as in the table and the csv file
 
     Log.W("\n*-------------------------------------------------*")
     Log.W("| Episode | Loss      | Training   | Validation   |")
@@ -161,7 +165,7 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
 
     # Set up X-Axis
     LossAxis.set_xlabel("Episode")
-    plt.xlim(0, NumberOfEpisodes)
+    plt.xlim(1, NumberOfEpisodes)
 
     # Y-Axis 1 (Loss)
     LossAxis.set_ylabel("Loss")
@@ -181,24 +185,11 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
     plt.tight_layout()
     LossAxis.ticklabel_format(useOffset=False, style="plain")
     plt.savefig(f"{Controls.OutputPath}/TrainingInfo.png")
+    plt.close(Figure)
 
-def DataExtraction_One(Log, Name, FeatureTensor, Label, LabelIndex, PositionIndex):
-    Log.W(f"{PositionIndex:>5} ", NewLine=False)
-    Log.W(f"{Name:<50} ", NewLine=False)
-    Log.W(f"{Label:<20} ", NewLine=False)
-    Log.W(f"{LabelIndex:<5} ", NewLine=False)
-    FeatureTensorFront = FeatureTensor[:5]
-    FeatureTensorBack  = FeatureTensor[-5:-1]
-    Log.W("[ ", NewLine=False)
-    for Entry in FeatureTensorFront:
-        Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-    Log.W("..., ", NewLine=False)
-    for Entry in FeatureTensorBack:
-        Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-    Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
-
-def DataExtraction_Two(Log, PreparedData, Samples, Classes):
-    Log.W(f"\nFinished Tensor of shape [{PreparedData["FeatureTensor"].shape[0]}, {PreparedData["FeatureTensor"].shape[1]}]")
+def DataExtraction(Log, PreparedData):
+    Log.W("\nExtracting data from the data set for the test application")
+    Log.W(f"Finished Tensor of shape [{PreparedData["FeatureTensor"].shape[0]}, {PreparedData["FeatureTensor"].shape[1]}]")
     Log.W("Number of images per class:")
     for Label in dict.fromkeys(PreparedData["Labels"]):
         Log.W(f"    {Label:<20} {PreparedData["Labels"].count(Label):>6}")

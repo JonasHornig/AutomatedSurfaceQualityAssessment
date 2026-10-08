@@ -25,6 +25,9 @@ class EpisodeLoader():
 
     def Initialize(self):
         self.CombinedClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
+        # With a single class per episode the loss is always zero, as every query is trivially assigned to the only prototype
+        if not 2 <= self.NumberOfClassesPerEpisode <= len(self.CombinedClasses):
+            raise ValueError(f"NumberOfClassesPerEpisode has to be between 2 and the number of classes in the data set ({len(self.CombinedClasses)}), got {self.NumberOfClassesPerEpisode}")
         self.SplitValidationSet()
 
     def SplitValidationSet(self, Mode: str = "Training"):
@@ -83,6 +86,7 @@ class EpisodeLoader():
         QueryTensors      = []
         ValidationTensors = []
         ValidationLabels  = []
+        EpisodeIndices    = {} # {<Sample_Class> : (support indices, query indices)}, only used for the log
         for EpisodeLabel, Class in enumerate(SelectedClasses):
             Sample, ClassName = Class.split("_", 1)
             Features          = self.Images[Sample][ClassName][Mode]["DinoFeatures"]
@@ -92,6 +96,7 @@ class EpisodeLoader():
             SupportIndices    : list[int] = ShuffledIndices[   : NS   ].tolist()
             QueryIndices      : list[int] = ShuffledIndices[NS : NS+NQ].tolist()
             ValidationIndices : list[int] = self.ValidationIndices[Class].tolist()
+            EpisodeIndices[Class] = (SupportIndices, QueryIndices)
 
             SupportTensors.append(   Features[SupportIndices]   )
             QueryTensors.append(     Features[QueryIndices]     )
@@ -104,7 +109,7 @@ class EpisodeLoader():
         Episode["ValidationLabels"] = torch.cat(ValidationLabels)   # Dim: Number of validation images of the selected classes. Labels follow the episode's class order
 
         if Controls.WriteDetailedDebugInfo:
-            LOG.TrainingEpisode(LogFile, Controls, SelectedClasses, SupportIndices, QueryIndices, ValidationIndices, Episode)
+            LOG.TrainingEpisode(LogFile, EpisodeIndices, Episode)
 
         return Episode
 
