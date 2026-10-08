@@ -23,7 +23,9 @@ class ValidationHandler():
         self.CombinedClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
 
     def ExtractData(self, LogFile, Controls, Mode="Testing"):
-        # Generate training tensors with the shape [NC, NS, DINO feature dimension]
+        # Generates one flat feature tensor with the shape [Total number of images, DINO feature dimension].
+        # The classes are concatenated instead of stacked, so they can contain different numbers of images.
+        # Row i of the tensor belongs to entry i of MasterIndices, Names, Labels and LabelIndices.
         self.PreparedData = {"MasterIndices": [], "Names": [], "Labels": [], "LabelIndices": [], "FeatureTensor": torch.empty((1, 1), dtype=torch.float32)}
         if Controls.WriteDetailedDebugInfo:
             LogFile.W("\nExtracting data from Data set for the test application")
@@ -35,9 +37,9 @@ class ValidationHandler():
                 Label      = f"{Sample}_{Class}"
                 LabelIndex = self.LabelMap[Label]
                 Features = []
-                for Index in range(self.Images[Sample][Class]["Testing"]["DinoFeatures"].shape[0]):
-                    ActiveFeatureTensor = self.Images[Sample][Class]["Testing"]["DinoFeatures"][Index]
-                    ActiveName = self.Images[Sample][Class]["Testing"]["Names"][Index]
+                for Index in range(self.Images[Sample][Class][Mode]["DinoFeatures"].shape[0]):
+                    ActiveFeatureTensor = self.Images[Sample][Class][Mode]["DinoFeatures"][Index]
+                    ActiveName = self.Images[Sample][Class][Mode]["Names"][Index]
 
                     Features.append(ActiveFeatureTensor)
                     self.PreparedData["MasterIndices"].append(RunningIndex)
@@ -50,7 +52,7 @@ class ValidationHandler():
                     RunningIndex += 1
                 ClassTensors.append(torch.stack(Features))
 
-        self.PreparedData["FeatureTensor"] = torch.stack(ClassTensors)
+        self.PreparedData["FeatureTensor"] = torch.cat(ClassTensors, dim=0)
         if Controls.WriteDetailedDebugInfo:
             LOG.DataExtraction_Two(LogFile, self.PreparedData, self.Samples, self.Classes)
         self.DataPrepared = True
@@ -63,10 +65,9 @@ def NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler):
 
 def NetworkTestApplication(LogFile, Controls, Network, ValidationHandler):
     ValidationHandler.ExtractData(LogFile, Controls, "Testing")
-    ViewDimension = ValidationHandler.PreparedData["FeatureTensor"].shape[0] * ValidationHandler.PreparedData["FeatureTensor"].shape[1]
     Network.Encoder.eval() # BatchNorm uses the running statistics from training instead of the statistics of the test data
     with torch.no_grad():
-        ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"].view(ViewDimension, Controls.FeatureDimension))
+        ValidationHandler.PreparedData["Embeddings"] = Network.Encoder.forward(ValidationHandler.PreparedData["FeatureTensor"])
 
     DistanceMatrix     = NN.EuclideanDistance(ValidationHandler.PreparedData["Embeddings"], Network.Prototypes)
     ProbabilityMatrix  = torch.nn.functional.softmax(-DistanceMatrix, dim=1)

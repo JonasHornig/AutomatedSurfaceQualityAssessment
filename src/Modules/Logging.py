@@ -94,7 +94,17 @@ def Training(Controls, EpisodeLoader, Log):
     Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<10} |")
     Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<10} |")
     Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<10} |")
+    Log.W(f"| Validation Fraction                 |          | {Controls.ValidationFraction:<10} |")
     Log.W("*-------------------------------------------------------------*")
+
+def ValidationSplit(Log, EpisodeLoader):
+    Log.W("\nHeld back validation images (never used as support or query samples)")
+    Log.W("*-------------------------------------------------*")
+    Log.W("| Class                | Training   | Validation  |")
+    Log.W("|----------------------|------------|-------------|")
+    for Class in EpisodeLoader.CombinedClasses:
+        Log.W(f"| {Class:<20} | {len(EpisodeLoader.TrainingIndices[Class]):<10} | {len(EpisodeLoader.ValidationIndices[Class]):<11} |")
+    Log.W("*-------------------------------------------------*")
 
 def WritelabelMap(Log, LabelMap):
     Log.W("\n*------------------------------*")
@@ -108,24 +118,24 @@ def TrainingEpisode(Log, Controls, SelectedClasses, SupportIndices, QueryIndices
     Log.W(f"  Selected classes   : {SelectedClasses}")
     Log.W(f"  Support indices    : {SupportIndices}")
     Log.W(f"  Query indices      : {QueryIndices}")
-    Log.W(f"  Validation indices : {ValidationIndices}")
+    Log.W(f"  Validation indices : {ValidationIndices} (fixed, held back)")
     
     Log.W(f"\n  Tensor shapes:")
     Log.W(f"  Support tensor   : [{Episode["SupportTensor"].size(0):>3}, {Episode["SupportTensor"].size(1):>3}, {Episode["SupportTensor"].size(2):>4}]")
     Log.W(f"  Query tensor     : [{Episode["QueryTensor"].size(0):>3}, {Episode["QueryTensor"].size(1):>3}, {Episode["QueryTensor"].size(2):>4}]")
-    Log.W(f"  Validation tensor: [{Episode["ValidationTensor"].size(0):>3}, {Episode["ValidationTensor"].size(1):>3}, {Episode["ValidationTensor"].size(2):>4}]")
+    Log.W(f"  Validation tensor: [{Episode["ValidationTensor"].size(0):>8}, {Episode["ValidationTensor"].size(1):>4}]")
 
 def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy):
     NumberOfEpisodes = len(RunningAccuracy)
     Episodes = [Episode for Episode in range(NumberOfEpisodes)]
 
-    Log.W("\n*---------------------------------------------*")
-    Log.W("| Episode | Loss    | Accuracy   | Validation |")
-    Log.W("|         |         |            | Accuracy   |")
-    Log.W("|---------|---------|------------|------------|")
+    Log.W("\n*-------------------------------------------------*")
+    Log.W("| Episode | Loss      | Training   | Validation   |")
+    Log.W("|         |           | Accuracy % | Accuracy %   |")
+    Log.W("|---------|-----------|------------|--------------|")
     for Index in range(NumberOfEpisodes):
-        Log.W(f"| {Index+1:<7} | {round(RunningLoss[Index],5):<7} | {round(100*RunningAccuracy[Index],7):<10} | {round(100*RunningValidationAccuracy[Index],7):<10} |")
-    Log.W("*---------------------------------------------*")
+        Log.W(f"| {Index+1:<7} | {RunningLoss[Index]:>9.6f} | {100*RunningAccuracy[Index]:>10.3f} | {100*RunningValidationAccuracy[Index]:>12.3f} |")
+    Log.W("*-------------------------------------------------*")
     StandardDeviationCutOff = int(NumberOfEpisodes/10)
     if StandardDeviationCutOff > 0:
         LossMean                = np.mean(RunningLoss[-StandardDeviationCutOff:])
@@ -139,9 +149,10 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
         Log.W(f"Validation accuracy standard deviation : {ValAccStandardDeviation:.3f} percentage points")
 
     with open(f"{Controls.OutputPath}TrainingProcess.csv", "w") as TrainingProcessCsv:
-        TrainingProcessCsv.write("Episode Index,         Loss, Validation Accuracy\n")
+        # Accuracies in %. Training accuracy is measured on the query samples, validation accuracy on the held back validation images
+        TrainingProcessCsv.write("Episode Index,      Loss, Training Accuracy, Validation Accuracy\n")
         for Index, _ in enumerate(RunningAccuracy):
-            TrainingProcessCsv.write(f"{Index+1:>13}, {round(RunningLoss[Index],10):12.8f}, {round(100*RunningAccuracy[Index],17):19.15f}\n")
+            TrainingProcessCsv.write(f"{Index+1:>13}, {RunningLoss[Index]:>9.6f}, {100*RunningAccuracy[Index]:>17.3f}, {100*RunningValidationAccuracy[Index]:>19.3f}\n")
 
     # Define plot
     Figure, LossAxis = plt.subplots(figsize=(12,5))
@@ -187,26 +198,26 @@ def DataExtraction_One(Log, Name, FeatureTensor, Label, LabelIndex, PositionInde
     Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
 
 def DataExtraction_Two(Log, PreparedData, Samples, Classes):
-    Log.W(f"\nFinished Tensor of shape [{PreparedData["FeatureTensor"].shape[0]}, {PreparedData["FeatureTensor"].shape[1]}, {PreparedData["FeatureTensor"].shape[2]}]")
+    Log.W(f"\nFinished Tensor of shape [{PreparedData["FeatureTensor"].shape[0]}, {PreparedData["FeatureTensor"].shape[1]}]")
+    Log.W("Number of images per class:")
+    for Label in dict.fromkeys(PreparedData["Labels"]):
+        Log.W(f"    {Label:<20} {PreparedData["Labels"].count(Label):>6}")
     Log.W("Extracted data:\nIndex Name                                               Label                Index Tensor")
-    RunningIndex = 0
-    for ClassIndex in range(PreparedData["FeatureTensor"].shape[0]):
-        for EntryIndex in range(PreparedData["FeatureTensor"].shape[1]):
-            Log.W(f"{RunningIndex:>5} ", NewLine=False)
-            Log.W(f"{PreparedData["Names"][RunningIndex]:<50} ", NewLine=False)
-            Log.W(f"{PreparedData["Labels"][RunningIndex]:<20} ", NewLine=False)
-            Log.W(f"{PreparedData["LabelIndices"][RunningIndex]:<5} ", NewLine=False)
-            FeatureTensor = PreparedData["FeatureTensor"][ClassIndex][EntryIndex]
-            FeatureTensorFront = FeatureTensor[:5]
-            FeatureTensorBack  = FeatureTensor[-5:-1]
-            Log.W("[ ", NewLine=False)
-            for Entry in FeatureTensorFront:
-                Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-            Log.W("..., ", NewLine=False)
-            for Entry in FeatureTensorBack:
-                Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
-            Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
-            RunningIndex += 1
+    for RunningIndex in range(PreparedData["FeatureTensor"].shape[0]):
+        Log.W(f"{RunningIndex:>5} ", NewLine=False)
+        Log.W(f"{PreparedData["Names"][RunningIndex]:<50} ", NewLine=False)
+        Log.W(f"{PreparedData["Labels"][RunningIndex]:<20} ", NewLine=False)
+        Log.W(f"{PreparedData["LabelIndices"][RunningIndex]:<5} ", NewLine=False)
+        FeatureTensor = PreparedData["FeatureTensor"][RunningIndex]
+        FeatureTensorFront = FeatureTensor[:5]
+        FeatureTensorBack  = FeatureTensor[-5:-1]
+        Log.W("[ ", NewLine=False)
+        for Entry in FeatureTensorFront:
+            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+        Log.W("..., ", NewLine=False)
+        for Entry in FeatureTensorBack:
+            Log.W(f"{round(Entry.item(), 3):>6}, ", NewLine=False)
+        Log.W(f"{round(FeatureTensor[-1].item(), 3):>6} ]")
 
 def TestApplicationResults(Log, Data, LookUpTable):
     Log.W("\nTest application of the proto net\n===================================")
@@ -214,11 +225,11 @@ def TestApplicationResults(Log, Data, LookUpTable):
     Log.W("| Index   | Correct Class              | Classification             | Confidence [%] |")
     Log.W("|---------|----------------------------|----------------------------|----------------|")
     for Index in Data["MasterIndices"]:
-        Log.W(f"| {Index:<7} | {Data["LabelIndices"][Index]:>3} - {Data["Labels"][Index]:<20} | {Data["Classifications"][Index]:>3} - {LookUpTable[Data["Classifications"][Index]]:<20} | {round(100*Data["Probabilities"][Index], 5):<14} |")
+        Log.W(f"| {Index:<7} | {Data["LabelIndices"][Index]:>3} - {Data["Labels"][Index]:<20} | {Data["Classifications"][Index]:>3} - {LookUpTable[Data["Classifications"][Index]]:<20} | {100*Data["Probabilities"][Index]:>14.3f} |")
     Log.W("*------------------------------------------------------------------------------------*")
     CorrectClassifications = [A == B for A, B in zip(Data["LabelIndices"], Data["Classifications"])]
     Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
-    Log.W(f"Accuracy = {round(Accuracy, 3)}")
+    Log.W(f"Accuracy = {Accuracy:.3f} %")
 
 def PlotPrincipalComponentAnalysis(Controls, ValidationHandler, Data, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
     '''

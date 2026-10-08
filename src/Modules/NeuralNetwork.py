@@ -108,18 +108,16 @@ class ProtoNet():
     def CalculateLoss(self, sample):
         PreprocessedSupportTensor = Variable(sample["SupportTensor"])   # S_k
         PreprocessedQueryTensor = Variable(sample["QueryTensor"])       # Q_k
-        PreprocessedValidateTensor = Variable(sample["ValidationTensor"])
+        ValidationTensor = sample["ValidationTensor"]                   # Held back validation images, Dim: Number of validation images, Feature dimension
+        ValidationLabels = sample["ValidationLabels"]                   # Episode label of each validation image
 
         NumberOfClasses = PreprocessedSupportTensor.size(0)          # N_C ~~ K
         NumberOfSupportSamples = PreprocessedSupportTensor.size(1)   # N_S
         NumberOfQuerySamples = PreprocessedQueryTensor.size(1)       # N_Q
-        NumberOfValidateSamples = PreprocessedValidateTensor.size(1)
 
         TargetIndices = torch.arange(0, NumberOfClasses).view(NumberOfClasses, 1, 1).expand(NumberOfClasses,NumberOfQuerySamples,1).long()
         # Dim: NumberOfClasses, NumberOfQuerySamples, 1
         TargetIndices           = Variable(TargetIndices, requires_grad=False)
-        TargetValidationIndices = torch.arange(0, NumberOfClasses).repeat_interleave(NumberOfValidateSamples)
-        # Dim: NumberOfClasses * NumberOfValidateSamples
 
         if PreprocessedQueryTensor.is_cuda:
             TargetIndices = TargetIndices.cuda()
@@ -129,7 +127,6 @@ class ProtoNet():
         #NumberOfClasses, NumberOfSamples, 768 --> NumberOfClasses * NumberOfSamples, 768
         ReshapedPreprocessedSupportTensor  = PreprocessedSupportTensor.view(  NumberOfClasses * NumberOfSupportSamples  , *PreprocessedSupportTensor.size()[2:])
         ReshapedPreprocessedQueryTensor    = PreprocessedQueryTensor.view(    NumberOfClasses * NumberOfQuerySamples    , *PreprocessedQueryTensor.size()[2:])
-        ReshapedPreprocessedValidateTensor = PreprocessedValidateTensor.view( NumberOfClasses * NumberOfValidateSamples , *PreprocessedValidateTensor.size()[2:])
         #Connect to NumberOfClasses * NumberOfSupportSamples + NumberOfClasses * NumberOfSupportSamples, 768
         InputTensor = torch.cat([ReshapedPreprocessedSupportTensor, ReshapedPreprocessedQueryTensor], 0)
 
@@ -159,21 +156,22 @@ class ProtoNet():
         self.Encoder.eval()
         with torch.no_grad():
             ValidationPrototypes  = self.Encoder.forward(ReshapedPreprocessedSupportTensor).view(NumberOfClasses,NumberOfSupportSamples,OutputDimensions).mean(1)
-            self.ValidationOutput = self.Encoder.forward(ReshapedPreprocessedValidateTensor)
+            self.ValidationOutput = self.Encoder.forward(ValidationTensor)
         self.Encoder.train()
 
         ValidationDistanceMatrix = EuclideanDistance(self.ValidationOutput, ValidationPrototypes)
         _, ValidationResultLabel = ValidationDistanceMatrix.min(1)
-        ValidationAccuracy       = torch.eq(ValidationResultLabel.squeeze(), TargetValidationIndices.squeeze()).float().mean()
+        ValidationAccuracy       = torch.eq(ValidationResultLabel, ValidationLabels).float().mean()
 
         return Loss, {
             "Loss": Loss.item(),
             "Accuracy": Accuracy.item(),
             "ValidationAccuracy": ValidationAccuracy.item()}
 
-    def ComputePrototypes(self, Images, LabelMap, Mode: str = "Training"):
+    def ComputePrototypes(self, Images, LabelMap, Indices: dict | None = None, Mode: str = "Training"):
         '''
-        Computes the final class prototypes after training as the mean embedding of all images of a class.
+        Computes the final class prototypes after training as the mean embedding of the images of a class.
+        Indices {<Sample_Class> : image indices} limits this to the given images, e.g. excluding the held back validation images. Without it all images are used.
         The prototypes are ordered by the label map, so prototype k belongs to the class with label k.
         The prototypes of the individual episodes can't be used for this, as their order follows the random class selection of the episode.
         '''
@@ -183,10 +181,22 @@ class ProtoNet():
         with torch.no_grad():
             for CombinedClass, _ in sorted(LabelMap.items(), key=lambda Entry: Entry[1]):
                 Sample, Class = CombinedClass.split("_", 1)
-                Embeddings = self.Encoder(Images[Sample][Class][Mode]["DinoFeatures"])
+                Features   = Images[Sample][Class][Mode]["DinoFeatures"]
+                if Indices is not None:
+                    Features = Features[Indices[CombinedClass]]
+                Embeddings = self.Encoder(Features)
                 Prototypes.append(Embeddings.mean(0))
         self.Encoder.train(WasTraining)
         self.Prototypes = torch.stack(Prototypes) # Dim: NumberOfClasses, EmbeddingDimension
+
+    def EvaluateAccuracy(self, Features, Labels) -> float:
+        # Classifies the features with the final prototypes and returns the fraction of correct classifications. Labels follow the label map.
+        WasTraining = self.Encoder.training
+        self.Encoder.eval()
+        with torch.no_grad():
+            _, Classifications = EuclideanDistance(self.Encoder(Features), self.Prototypes).min(1)
+        self.Encoder.train(WasTraining)
+        return torch.eq(Classifications, Labels).float().mean().item()
 
     def SaveNetwork(self, Log, OutputPath: str):
         # The prototypes are ordered by the label map, which is saved separately as Labelmap.json

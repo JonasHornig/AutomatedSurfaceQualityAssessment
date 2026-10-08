@@ -68,10 +68,17 @@ class DataSet():
 
         self.HdfFiles = [Entry for Entry in os.listdir(self.DataSetPath) if Entry.endswith(f"_{Controls.FeatureExtractor}Features.h5") and Entry.startswith(self.DataSetName + "_")]
 
-        if self.HdfFiles and not ForceLoadImages:
+        if ForceLoadImages:
+            self.LoadDataSetImages(LogFile, WriteDetailedDebugInfo=Controls.WriteDetailedDebugInfo)
+        elif self.HdfFiles:
             self.LoadDataSetFromHdfFile(LogFile, WriteDetailedDebugInfo=Controls.WriteDetailedDebugInfo)
         else:
-            self.LoadDataSetImages(LogFile, WriteDetailedDebugInfo=Controls.WriteDetailedDebugInfo)
+            # Feature extraction is a separate, slow step that needs the raw images and the DINO weights, so it is not started automatically
+            Message = (f"No {Controls.FeatureExtractor} feature files found for {self.DataSetName} "
+                       f"(expected {self.DataSetPath}/{self.DataSetName}_<Sample>_{Controls.FeatureExtractor}Features.h5).\n"
+                       f"Run PreprocessImages.py with DataSet = \"{self.DataSetName}\" and FeatureExtractor = \"{Controls.FeatureExtractor}\" first.")
+            LogFile.W(f"ERROR! - {Message}")
+            raise FileNotFoundError(Message)
 
     def LoadDataSetFromHdfFile(self, LogFile, WriteDetailedDebugInfo: bool = True):
         Warnings = []

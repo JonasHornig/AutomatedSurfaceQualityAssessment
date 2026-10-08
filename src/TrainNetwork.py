@@ -15,8 +15,6 @@ import Modules.Logging as LOG
 import Modules.EpisodeHandler as EPH
 import Modules.NetworkValidation as VAL
 
-import PreprocessImages as PPI
-
 @dataclass
 class ControlVariables:
     # Inputs
@@ -37,6 +35,7 @@ class ControlVariables:
     NumberOfClassesPerEpisode      : int   = 6     # N_C =< K
     NumberOfSupportSamplesPerClass : int   = 9     # N_S
     NumberOfQuerySamplesPerClass   : int   = 1     # N_Q
+    ValidationFraction             : float = 0.25  # Fraction of the training images of each class held back for validation, never used for support or query samples
 
     # Flags
     #  --  True  --  False  --
@@ -63,11 +62,7 @@ def Main():
     LogFile = LOG.NoteFile(f"{Controls.OutputPath}/Training.log")
     LogFile.W("\n****************************\n*  Training the Proto Net  *\n****************************")
     DataSet = DATA.DataSet()
-    DataSet.LoadDataSet(LogFile, Controls)
-
-    if not DataSet.ProcessedDataSet:
-        LogFile = LOG.NoteFile(f"Outputs/Preprocessing.log")
-        PPI.Main(LogFile)
+    DataSet.LoadDataSet(LogFile, Controls) # Stops with an error if the features have not been extracted with PreprocessImages.py yet
 
     ProtoNet  = NN.ProtoNet(LogFile, Controls)
     Optimizer = torch.optim.AdamW(ProtoNet.Encoder.parameters(), lr=Controls.LearningRate, weight_decay=Controls.WeightDecay)
@@ -75,6 +70,7 @@ def Main():
 
     EpisodeLoader = EPH.EpisodeLoader(DataSet.Images, DataSet.GetParameters(), Controls)
     LOG.Training(Controls, EpisodeLoader, LogFile)
+    LOG.ValidationSplit(LogFile, EpisodeLoader)
     EpisodeLoader.GenerateLabelMap(Controls.OutputPath)
     LOG.WritelabelMap(LogFile, EpisodeLoader.LabelMap)
 
@@ -101,10 +97,15 @@ def Main():
         if Controls.UseLearningRateScheduler:
             Scheduler.step()
 
-    ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap)
+    # The final prototypes are computed from the training images only, so the held back validation images stay unseen
+    ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap, EpisodeLoader.TrainingIndices)
     ProtoNet.SaveNetwork(LogFile, Controls.OutputPath)
 
-    print(f"Final validation Accuracy: {round(100*LossInfo["ValidationAccuracy"],3)} %")
+    ValidationFeatures, ValidationLabels = EpisodeLoader.GetValidationSet()
+    FinalValidationAccuracy = ProtoNet.EvaluateAccuracy(ValidationFeatures, ValidationLabels)
+    Message = f"Final validation accuracy (final prototypes, {len(ValidationLabels)} held back training images): {100*FinalValidationAccuracy:.3f} %"
+    print(Message)
+    LogFile.W(f"\n{Message}")
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
 
     ValidationHandler = VAL.ValidationHandler(DataSet, DataSet.GetParameters(), EpisodeLoader, ProtoNet)
