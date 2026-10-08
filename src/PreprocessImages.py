@@ -22,7 +22,7 @@ class ControlVariables:
 
     # Feature extractor
     FeatureExtractor : str = "DINOv3"
-    DinoWeightsName  : str = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth" # located in <Repository>/Models/
+    DinoWeightsName  : str = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth" # located in <Repository>/src/Models/
 
     # Flags
     #  --  True  --  False  --
@@ -38,9 +38,11 @@ class ControlVariables:
     DataSetPath    : str = ""
 
     def __post_init__(self):
-        self.DataSetPath = f"DataSets/{self.DataSet}"
-        RepositoryDirectory  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.DinoWeightsPath = f"{RepositoryDirectory}/Models/{self.DinoWeightsName}"
+        # Paths are resolved from the location of this script, so it can be run from any working directory
+        BaseDirectory        = os.path.dirname(os.path.abspath(__file__))
+        self.DataSetPath     = f"{BaseDirectory}/DataSets/{self.DataSet}"
+        self.OutputPath      = f"{BaseDirectory}/Outputs/"
+        self.DinoWeightsPath = f"{BaseDirectory}/Models/{self.DinoWeightsName}"
 
 def Main(LogFile):
     LogFile.W("\n*****************************\n*  Data set pre-processing  *\n*       using DINOv3        *\n*****************************")
@@ -91,7 +93,7 @@ def Main(LogFile):
 
 if __name__ == "__main__":
     print("")
-    LogFile = LOG.NoteFile(f"Outputs/Preprocessing.log")
+    LogFile = LOG.NoteFile(f"{ControlVariables().OutputPath}/Preprocessing.log")
     Main(LogFile)
 
     LogFile.W(f"\nPre-processing complete")

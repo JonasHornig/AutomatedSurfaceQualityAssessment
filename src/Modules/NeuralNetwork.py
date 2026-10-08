@@ -16,7 +16,6 @@ class DINOv3Model():
         self.Preprocessor = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # normalizing images the same way the DINOv3 (LVD-1689M) training images were normalized
-        # DINOv3 weights are gated - request access at ai.meta.com/resources/models-and-libraries/dinov3-downloads/ and download the ViT-B/16 checkpoint
         self.Model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vitb16', weights=WeightsPath)
         self.LoadModel()
 
