@@ -18,9 +18,8 @@ class ControlVariables:
     # Inputs
     DataSet : str       = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
 
-    # Feature extractor
-    FeatureExtractor : str = "DINOv3"
-    DinoWeightsName  : str = "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth" # located in <Repository>/src/Models/
+    # Feature extractor, see NeuralNetwork.DINOV3_MODELS. The weights are located in <Repository>/src/Models/
+    FeatureExtractor : str = "DINOv3" #  --  DINOv3 (ViT-B/16)  --  DINOv3-H16plus (ViT-H+/16, about 10 times slower)
 
     # Flags
     #  --  True  --  False  --
@@ -35,15 +34,14 @@ class ControlVariables:
         BaseDirectory        = os.path.dirname(os.path.abspath(__file__))
         self.DataSetPath     = f"{BaseDirectory}/DataSets/{self.DataSet}"
         self.OutputPath      = f"{BaseDirectory}/Outputs"
-        self.DinoWeightsPath = f"{BaseDirectory}/Models/{self.DinoWeightsName}"
+        self.ModelDirectory  = f"{BaseDirectory}/Models"
 
-def Main(LogFile):
-    LogFile.W("\n*****************************\n*  Data set pre-processing  *\n*       using DINOv3        *\n*****************************")
+def Main(LogFile, Controls):
+    LogFile.W(f"\n*****************************\n*  Data set pre-processing  *\n*****************************\nData set: {Controls.DataSet}, feature extractor: {Controls.FeatureExtractor}")
 
-    Controls  = ControlVariables()
-    DinoModel = NN.DINOv3Model(Controls.DinoWeightsPath)
-    MetaData  = {"FeatureExtractor": "dinov3_vitb16", "Weights": Controls.DinoWeightsName, "HubRepository": NN.DINOV3_HUB_REPOSITORY}
-    LogFile.W("\nLoading DINOv3 model complete.")
+    DinoModel = NN.DINOv3Model(Controls.FeatureExtractor, Controls.ModelDirectory)
+    MetaData  = {"FeatureExtractor": DinoModel.HubEntryPoint, "Weights": DinoModel.WeightsName, "HubRepository": NN.DINOV3_HUB_REPOSITORY}
+    LogFile.W(f"\nLoading {DinoModel.HubEntryPoint} complete.")
 
     print("Load images from data set.")
     DataSet = DATA.DataSet(Controls.TargetImageSize)
@@ -64,26 +62,27 @@ def Main(LogFile):
                     for PilImage in DataSet.Images[Sample][Class][Mode]["Images"]:
                         PilImage.close()
 
+            # Each sample is written as soon as it is finished, so an interrupted run only loses the sample in progress
+            with h5py.File(f"{Controls.DataSetPath}/{Controls.DataSet}_{Sample}_{Controls.FeatureExtractor}Features.h5", "w") as HdfFile:
+                for Class in DataSet.Images[Sample]:
+                    for Mode in DataSet.Images[Sample][Class]:
+                        HdfFile.create_dataset(f"{Class}/{Mode}/Names"       , data = DataSet.Images[Sample][Class][Mode]["Names"])
+                        HdfFile.create_dataset(f"{Class}/{Mode}/DinoFeatures", data = DataSet.Images[Sample][Class][Mode]["DinoFeatures"], compression = "gzip", compression_opts = 4)
+                HdfMetaData = HdfFile.require_group("MetaData")
+                for Key in MetaData.keys():
+                    HdfMetaData.attrs[Key] = MetaData[Key]
+
+                LOG.LogHdf5Write(LogFile, Controls, HdfFile)
+
     if DataSet.NumberOfResizedImages > 0:
         LogFile.W(f"\nWARNING! - {DataSet.NumberOfResizedImages} images did not match the target size {Controls.TargetImageSize} and were resized. Check the tiling.")
         print(f"WARNING! - {DataSet.NumberOfResizedImages} images were resized. See log file.")
 
-    for Sample in DataSet.Images:
-        with h5py.File(f"{Controls.DataSetPath}/{Controls.DataSet}_{Sample}_{Controls.FeatureExtractor}Features.h5", "w") as HdfFile:
-            for Class in DataSet.Images[Sample]:
-                for Mode in DataSet.Images[Sample][Class]:
-                    HdfFile.create_dataset(f"{Class}/{Mode}/Names"       , data = DataSet.Images[Sample][Class][Mode]["Names"])
-                    HdfFile.create_dataset(f"{Class}/{Mode}/DinoFeatures", data = DataSet.Images[Sample][Class][Mode]["DinoFeatures"], compression = "gzip", compression_opts = 4)
-            HdfMetaData = HdfFile.require_group("MetaData")
-            for Key in MetaData.keys():
-                HdfMetaData.attrs[Key] = MetaData[Key]
-
-            LOG.LogHdf5Write(LogFile, Controls, HdfFile)
-
 if __name__ == "__main__":
     print("")
-    LogFile = LOG.NoteFile(f"{ControlVariables().OutputPath}/Preprocessing.log")
-    Main(LogFile)
+    Controls = ControlVariables()
+    LogFile  = LOG.NoteFile(f"{Controls.OutputPath}/Preprocessing_{Controls.DataSet}_{Controls.FeatureExtractor}.log")
+    Main(LogFile, Controls)
 
     LogFile.W(f"\nPre-processing complete")
     Duration = time.time() - StartTime

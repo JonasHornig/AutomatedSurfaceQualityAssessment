@@ -21,7 +21,7 @@ import Modules.NetworkTesting as TEST
 class ControlVariables:
     # Inputs
     DataSet    : str   = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
-    FeatureExtractor : str = "DINOv3"   #  --  DINOv3  --  legacy was DINOv1 ViT-B/16
+    FeatureExtractor : str = "DINOv3"   #  --  DINOv3 (ViT-B/16)  --  DINOv3-H16plus (ViT-H+/16)  --  see NeuralNetwork.DINOV3_MODELS
 
     # Network. The input dimension is taken from the feature files (768 for DINOv3 ViT-B/16)
     EmbeddingDimension   : int   = 5

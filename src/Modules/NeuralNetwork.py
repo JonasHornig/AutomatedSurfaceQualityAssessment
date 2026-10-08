@@ -13,12 +13,23 @@ from . import Logging as LOG
 # so later changes to the DINOv3 repository can't change the extracted features.
 DINOV3_HUB_REPOSITORY = "facebookresearch/dinov3:6876159a11b4df116f30f667f8c9888617df0751"
 
+# Supported feature extractors. The name is used for the feature files <DataSet>_<Sample>_<Name>Features.h5 (it must not contain "_").
+# The weights are gated and have to be downloaded from Meta into src/Models/.
+DINOV3_MODELS = {
+    # Name             : (torch.hub entry point, weights file)                                   # Parameters, feature dimension
+    "DINOv3"           : ("dinov3_vitb16"    , "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"    ), #  86 M,  768
+    "DINOv3-H16plus"   : ("dinov3_vith16plus", "dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth"), # 840 M, 1280
+}
+
 class DINOv3Model():
-    def __init__(self, WeightsPath: str):
+    def __init__(self, Name: str, ModelDirectory: str):
+        if Name not in DINOV3_MODELS:
+            raise ValueError(f"Unknown feature extractor {Name}. Available: {list(DINOV3_MODELS)}")
+        self.HubEntryPoint, self.WeightsName = DINOV3_MODELS[Name]
         self.Preprocessor = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # normalizing images the same way the DINOv3 (LVD-1689M) training images were normalized
-        self.Model = torch.hub.load(DINOV3_HUB_REPOSITORY, 'dinov3_vitb16', weights=WeightsPath)
+        self.Model = torch.hub.load(DINOV3_HUB_REPOSITORY, self.HubEntryPoint, weights=f"{ModelDirectory}/{self.WeightsName}")
         self.LoadModel()
 
     def LoadModel(self):
