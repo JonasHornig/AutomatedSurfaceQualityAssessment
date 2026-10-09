@@ -15,7 +15,7 @@ vision transformer.
    DINOv3 model. Its class token is stored as the feature vector of the tile in an HDF5 file.
 2. **Embedding network** (`src/Modules/NeuralNetwork.py`): a custom NN maps the feature vector
    (768 dimensions for ViT-B/16) through `NumberOfHiddenLayers` hidden blocks (Linear, BatchNorm, LeakyReLU)
-   and a linear output layer into a low dimensional embedding space (5 dimensions by default).
+   and a linear output layer into a low dimensional embedding space (8 dimensions by default).
 3. **Episodic training** (`src/TrainNetwork.py`): every episode draws `N_C` classes with `N_S` support and
    `N_Q` query images each. The prototype of a class is the mean embedding of its support images, and the
    loss is the cross entropy over the negative squared Euclidean distances of the queries to the prototypes.
@@ -28,16 +28,20 @@ A class is the combination of material and surface state, e.g. `18201_Polished`.
 
 ## Results
 
-`CompleteDataSet`, default settings of `TrainNetwork.py` (500 episodes, `N_C = 6`, `N_S = 9`, `N_Q = 1`),
-mean ± standard deviation over five seeds, 15,000 test images:
+`CompleteDataSet`, default settings of `TrainNetwork.py` (500 episodes, `N_C = 6`, `N_S = 9`, `N_Q = 1`,
+8 embedding dimensions), mean ± standard deviation over five seeds, 15,000 test images:
 
-| Features        | Test accuracy, all classes | Surface state (polished vs. scratched) |
-|-----------------|----------------------------|----------------------------------------|
-| DINOv3 ViT-B/16 | 95.6 ± 0.7 %               | 99.4 %                                 |
-| DINOv1 ViT-B/16 | 96.9 ± 0.3 %               | 99.8 %                                 |
+| Features        | Validation accuracy | Test accuracy, all classes | Surface state (polished vs. scratched) |
+|-----------------|---------------------|----------------------------|----------------------------------------|
+| DINOv3 ViT-B/16 | 94.7 ± 0.5 %        | 95.8 ± 0.2 %               | 99.4 %                                 |
+| DINOv1 ViT-B/16 | 96.2 ± 0.3 %        | 96.9 ± 0.2 %               | 99.8 %                                 |
 
 Most remaining errors are confusions between the polished surfaces of the materials 18201 and 22348.
 The training settings were originally tuned on the DINOv1 features.
+
+The embedding dimension was chosen on the validation accuracy (DINOv3 ViT-B/16, five seeds each):
+2 dimensions are too few (92.8 ± 2.4 %), 3 to 8 dimensions perform equally well (94.5–94.8 %),
+and 16 or 32 dimensions are slightly worse (94.4 and 94.0 %). 8 dimensions gave the most consistent results.
 
 ## Installation
 

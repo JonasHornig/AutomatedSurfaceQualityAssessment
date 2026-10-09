@@ -24,7 +24,7 @@ class ControlVariables:
     FeatureExtractor : str = "DINOv3"   #  --  "DINOv3" (ViT-B/16)  --  "DINOv3-H16plus" (ViT-H+/16)  --  "DINOv1" (legacy, provided as files only)
 
     # Network. The input dimension is taken from the feature files (768 for DINOv3 ViT-B/16)
-    EmbeddingDimension   : int   = 5
+    EmbeddingDimension   : int   = 8 # 3 to 8 performed equally well in a study (5 seeds each), 8 gave the most consistent results
     NumberOfHiddenLayers : int   = 4
     Gamma                : float = 0.75
 
