@@ -24,10 +24,11 @@ class ControlVariables:
     # Flags
     #  --  True  --  False  --
     WriteDetailedDebugInfo : bool = False # True: also logs the feature vector of every image (large log files)
+    ResumeExtraction       : bool = True  # True: classes that are already complete in the feature file are kept and skipped, so an interrupted run continues where it stopped. False: the feature files are written anew
 
     # Image handling
     TargetImageSize : tuple = (224,224)
-    MaxBatchSize    : int   = 64 # Maximum number of images passed through DINOv3 at once, limits the memory use
+    MaxBatchSize    : int   = 16 # Maximum number of images passed through DINOv3 at once. Limits the memory use, which matters for the large ViT-H+ model
 
     def __post_init__(self):
         # Paths are resolved from the location of this script, so it can be run from any working directory
@@ -35,6 +36,13 @@ class ControlVariables:
         self.DataSetPath     = f"{BaseDirectory}/DataSets/{self.DataSet}"
         self.OutputPath      = f"{BaseDirectory}/Outputs"
         self.ModelDirectory  = f"{BaseDirectory}/Models"
+
+def IsComplete(HdfFile, Group: str, Names: list[str]) -> bool:
+    # A class is complete if its features and names were written and the names match the images of the class
+    if f"{Group}/Names" not in HdfFile or f"{Group}/DinoFeatures" not in HdfFile:
+        return False
+    StoredNames = [Name.decode("utf-8") for Name in HdfFile[f"{Group}/Names"][:]] # type: ignore
+    return StoredNames == Names and HdfFile[f"{Group}/DinoFeatures"].shape[0] == len(Names) # type: ignore
 
 def Main(LogFile, Controls):
     LogFile.W(f"\n*****************************\n*  Data set pre-processing  *\n*****************************\nData set: {Controls.DataSet}, feature extractor: {Controls.FeatureExtractor}")
@@ -50,27 +58,38 @@ def Main(LogFile, Controls):
     LogFile.W("\nProcessing images")
     with tqdm(total=DataSet.TotalNumberOfImages, desc=f"Extracting features", unit=" img") as ProgressBar:
         for Sample in DataSet.Images:
-            for Class in DataSet.Images[Sample]:
-                for Mode in DataSet.Images[Sample][Class]:
-                    LogFile.W(f"{Sample}, {Class}, {Mode}, ", NewLine=False)
-                    DataSet.Images[Sample][Class][Mode]["Images"] = []
-                    for ImagePath in DataSet.Images[Sample][Class][Mode]["Names"]:
-                        with Image.open(f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{ImagePath}") as PilImage:
-                            ValidatedImage = DataSet.ValidateImage(PilImage, ImagePath, LogFile)
-                        DataSet.Images[Sample][Class][Mode]["Images"].append(ValidatedImage)
-                    DinoModel.ApplyNetwork(DataSet.Images[Sample][Class][Mode], LogFile, ProgressBar, Controls.WriteDetailedDebugInfo, Controls.MaxBatchSize)
-                    for PilImage in DataSet.Images[Sample][Class][Mode]["Images"]:
-                        PilImage.close()
-
-            # Each sample is written as soon as it is finished, so an interrupted run only loses the sample in progress
-            with h5py.File(f"{Controls.DataSetPath}/{Controls.DataSet}_{Sample}_{Controls.FeatureExtractor}Features.h5", "w") as HdfFile:
-                for Class in DataSet.Images[Sample]:
-                    for Mode in DataSet.Images[Sample][Class]:
-                        HdfFile.create_dataset(f"{Class}/{Mode}/Names"       , data = DataSet.Images[Sample][Class][Mode]["Names"])
-                        HdfFile.create_dataset(f"{Class}/{Mode}/DinoFeatures", data = DataSet.Images[Sample][Class][Mode]["DinoFeatures"], compression = "gzip", compression_opts = 4)
+            # Each class is written to the feature file of its sample as soon as it is finished, so an interrupted run only loses the class in progress
+            with h5py.File(f"{Controls.DataSetPath}/{Controls.DataSet}_{Sample}_{Controls.FeatureExtractor}Features.h5", "a" if Controls.ResumeExtraction else "w") as HdfFile:
                 HdfMetaData = HdfFile.require_group("MetaData")
                 for Key in MetaData.keys():
                     HdfMetaData.attrs[Key] = MetaData[Key]
+
+                for Class in DataSet.Images[Sample]:
+                    for Mode in DataSet.Images[Sample][Class]:
+                        Images = DataSet.Images[Sample][Class][Mode]
+                        Group  = f"{Class}/{Mode}"
+                        if IsComplete(HdfFile, Group, Images["Names"]):
+                            LogFile.W(f"{Sample}, {Class}, {Mode}: already extracted, skipped")
+                            ProgressBar.update(len(Images["Names"]))
+                            continue
+                        if Group in HdfFile:
+                            del HdfFile[Group] # incomplete class of an interrupted run
+
+                        LogFile.W(f"{Sample}, {Class}, {Mode}, ", NewLine=False)
+                        Images["Images"] = []
+                        for ImagePath in Images["Names"]:
+                            with Image.open(f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{ImagePath}") as PilImage:
+                                ValidatedImage = DataSet.ValidateImage(PilImage, ImagePath, LogFile)
+                            Images["Images"].append(ValidatedImage)
+                        DinoModel.ApplyNetwork(Images, LogFile, ProgressBar, Controls.WriteDetailedDebugInfo, Controls.MaxBatchSize)
+                        for PilImage in Images["Images"]:
+                            PilImage.close()
+
+                        # The names are written last, so they mark the class as complete
+                        HdfFile.create_dataset(f"{Group}/DinoFeatures", data = Images["DinoFeatures"], compression = "gzip", compression_opts = 4)
+                        HdfFile.create_dataset(f"{Group}/Names"       , data = Images["Names"])
+                        HdfFile.flush()
+                        Images["Images"], Images["DinoFeatures"] = [], None # free the memory before the next class
 
                 LOG.LogHdf5Write(LogFile, Controls, HdfFile)
 
