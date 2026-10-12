@@ -3,66 +3,85 @@ StartTime = time.time()
 
 import torch
 import os
+import json
+import random
+import numpy as np
 
 from tqdm import tqdm
-from dataclasses import dataclass, field
+from datetime import datetime
+from dataclasses import dataclass, asdict
 
 import Modules.DataSetHandling as DATA
 import Modules.NeuralNetwork as NN
 import Modules.Logging as LOG
 import Modules.EpisodeHandler as EPH
-import Modules.NetworkValidation as VAL
-
-import PreprocessImages as PPI
+import Modules.NetworkTesting as TEST
 
 @dataclass
 class ControlVariables:
     # Inputs
-    Modes      : tuple = ("Training", "Testing")
-    DataSet    : str   = "SmallDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
+    DataSet    : str   = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
+    FeatureExtractor : str = "DINOv3"   #  --  "DINOv3" (ViT-B/16)  --  "DINOv3-H16plus" (ViT-H+/16)  --  "DINOv1" (legacy, provided as files only)
 
-    FeatureDimension     : int   = 768
-    EmbeddingDimension   : int   = 5
+    # Network. The input dimension is taken from the feature files (768 for DINOv3 ViT-B/16)
+    EmbeddingDimension   : int   = 8 # 3 to 8 performed equally well in a study (5 seeds each), 8 gave the most consistent results
     NumberOfHiddenLayers : int   = 4
     Gamma                : float = 0.75
 
     NumberOfEpisodes               : int   = 500
     LearningRate                   : float = 1e-4
+    WeightDecay                    : float = 1e-2  # AdamW weight decay (1e-2 is the PyTorch default)
+    UseLearningRateScheduler       : bool  = False # Cosine annealing of the learning rate from LearningRate to 0 over NumberOfEpisodes. (slightly worse results than a constant learning rate, but the final validation accuracy is more stable)
+    Seed                           : int   = 333     # Seed for all random number generators, makes training runs reproducible
     NumberOfClassesPerEpisode      : int   = 6     # N_C =< K
     NumberOfSupportSamplesPerClass : int   = 9     # N_S
     NumberOfQuerySamplesPerClass   : int   = 1     # N_Q
+    ValidationFraction             : float = 0.25  # Fraction of the training images of each class held back for validation, never used for support or query samples
+
+    # Outputs
+    RunName : str = "" # Name of the output folder Outputs/<RunName>/. Empty: date and time of the start of the run, so runs never overwrite each other
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo : bool = True
-    
-    # Parameter initialisation
-    NumberOfClasses : int = 0 # K
-    
+    WriteDetailedDebugInfo : bool = False # True: also logs every episode, image and feature vector (large log files)
+
     def __post_init__(self):
         BaseDirectory = os.path.dirname(os.path.abspath(__file__))
+        if not self.RunName:
+            self.RunName = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.DataSetPath = f"{BaseDirectory}/DataSets/{self.DataSet}"
-        self.OutputPath : str   = f"{BaseDirectory}/Outputs/"
+        self.OutputPath : str   = f"{BaseDirectory}/Outputs/{self.RunName}"
+
+    def Save(self):
+        # All settings of the run are saved next to its results, so every run can be reproduced
+        with open(f"{self.OutputPath}/Settings.json", "w") as SettingsFile:
+            json.dump(asdict(self), SettingsFile, indent=4)
+
+def SetSeed(Seed: int):
+    # Episode sampling uses Python's random module and torch, the weight initialisation uses torch
+    random.seed(Seed)
+    np.random.seed(Seed)
+    torch.manual_seed(Seed)
 
 def Main():
     Controls  = ControlVariables()
+    SetSeed(Controls.Seed)
     print("")
     LogFile = LOG.NoteFile(f"{Controls.OutputPath}/Training.log")
+    Controls.Save()
+    print(f"Writing results to {Controls.OutputPath}")
     LogFile.W("\n****************************\n*  Training the Proto Net  *\n****************************")
+    LogFile.W(f"Run name: {Controls.RunName} - all settings are saved in Settings.json")
     DataSet = DATA.DataSet()
-    DataSet.LoadDataSet(LogFile, Controls)
+    DataSet.LoadDataSet(LogFile, Controls) # Stops with an error if the features have not been extracted with PreprocessImages.py yet
 
-    if not DataSet.ProcessedDataSet:
-        LogFile = LOG.NoteFile(f"Outputs/Preprocessing.log")
-        PPI.Main(LogFile)
-
-    ProtoNet  = NN.ProtoNet(LogFile, Controls)
-    Optimizer = torch.optim.AdamW(ProtoNet.Encoder.parameters(), lr=Controls.LearningRate)
-    Optimizer.zero_grad()
+    ProtoNet  = NN.ProtoNet(LogFile, Controls, DataSet.FeatureDimension)
+    Optimizer = torch.optim.AdamW(ProtoNet.Encoder.parameters(), lr=Controls.LearningRate, weight_decay=Controls.WeightDecay)
     Scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(Optimizer, T_max=Controls.NumberOfEpisodes)
 
-    EpisodeLoader = EPH.EpisodeLoader(DataSet.Images, DataSet.GetParameters(), Controls)
-    LOG.Training(Controls, EpisodeLoader, LogFile)
+    EpisodeLoader = EPH.EpisodeLoader(DataSet, Controls)
+    LOG.Training(LogFile, Controls)
+    LOG.ValidationSplit(LogFile, EpisodeLoader, Controls.WriteDetailedDebugInfo)
     EpisodeLoader.GenerateLabelMap(Controls.OutputPath)
     LOG.WritelabelMap(LogFile, EpisodeLoader.LabelMap)
 
@@ -71,11 +90,13 @@ def Main():
     RunningValidationAccuracy = []
 
     print("Main training loop")
+    ProtoNet.Encoder.train()
     for EpisodeIndex in tqdm(range(1, Controls.NumberOfEpisodes + 1), desc="Progress", unit="ep"):
         if Controls.WriteDetailedDebugInfo:
             LogFile.W(f"\nEpisode {EpisodeIndex:>5} out of {Controls.NumberOfEpisodes:>5}")
 
         ActiveEpisode = EpisodeLoader.GetRandomEpisode(LogFile, Controls)
+        Optimizer.zero_grad() # Gradients have to be reset each episode, otherwise they accumulate over all previous episodes
         Loss, LossInfo = ProtoNet.CalculateLoss(ActiveEpisode)
 
         RunningLoss.append(LossInfo["Loss"])
@@ -84,12 +105,22 @@ def Main():
 
         Loss.backward()
         Optimizer.step()
+        if Controls.UseLearningRateScheduler:
+            Scheduler.step()
 
-    print(f"Final validation Accuracy: {round(100*LossInfo["ValidationAccuracy"],3)} %")
+    # The final prototypes are computed from the training images only, so the held back validation images stay unseen
+    ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap, EpisodeLoader.TrainingIndices)
+    ProtoNet.SaveNetwork(LogFile, Controls.OutputPath)
+
+    ValidationFeatures, ValidationLabels = EpisodeLoader.GetValidationSet()
+    FinalValidationAccuracy = ProtoNet.EvaluateAccuracy(ValidationFeatures, ValidationLabels)
+    Message = f"Final validation accuracy (final prototypes, {len(ValidationLabels)} held back training images): {100*FinalValidationAccuracy:.3f} %"
+    print(Message)
+    LogFile.W(f"\n{Message}")
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
 
-    ValidationHandler = VAL.ValidationHandler(DataSet, DataSet.GetParameters(), EpisodeLoader, ProtoNet)
-    VAL.NetworkValidationMain(LogFile, Controls, ProtoNet, ValidationHandler)
+    TestHandler = TEST.TestHandler(DataSet, EpisodeLoader, ProtoNet)
+    TEST.NetworkTestMain(LogFile, Controls, ProtoNet, TestHandler)
 
     Duration = time.time() - StartTime
     Hours = int(Duration // 3600)
