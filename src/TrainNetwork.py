@@ -36,15 +36,14 @@ class ControlVariables:
     NumberOfClassesPerEpisode      : int   = 6     # N_C =< K
     NumberOfSupportSamplesPerClass : int   = 10    # N_S
     NumberOfQuerySamplesPerClass   : int   = 10    # N_Q
-    ValidationFraction             : float = 0.25  # Fraction of the training images of each class held back for validation, never used for support or query samples
 
     # Outputs
     RunName : str = "" # Name of the output folder Outputs/<RunName>/. Empty: date and time of the start of the run, so runs never overwrite each other
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo : bool = False
-    GenerateRandomSeed     : bool = True
+    WriteDetailedDebugInfo : bool = False     # Enabling this may severely impact performance
+    GenerateRandomSeed     : bool = False
 
     def __post_init__(self):
         BaseDirectory = os.path.dirname(os.path.abspath(__file__))
@@ -84,10 +83,9 @@ def Main():
     Scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(Optimizer, T_max=Controls.NumberOfEpisodes)
 
     EpisodeLoader = EPH.EpisodeLoader(DataSet, Controls)
-    LOG.Training(LogFile, Controls)
-    LOG.ValidationSplit(LogFile, EpisodeLoader, Controls.WriteDetailedDebugInfo)
+    EpisodeLoader.Initialize(LogFile, Controls)
     EpisodeLoader.GenerateLabelMap(Controls.OutputPath)
-    LOG.WritelabelMap(LogFile, EpisodeLoader.LabelMap)
+    LOG.TrainingSettings(LogFile, Controls, EpisodeLoader)
 
     RunningLoss               = []
     RunningAccuracy           = []
@@ -96,9 +94,6 @@ def Main():
     print("\nMain training loop")
     ProtoNet.Encoder.train()
     for EpisodeIndex in tqdm(range(1, Controls.NumberOfEpisodes + 1), desc="Progress", unit="ep"):
-        if Controls.WriteDetailedDebugInfo:
-            LogFile.W(f"\nEpisode {EpisodeIndex:>5} out of {Controls.NumberOfEpisodes:>5}")
-
         ActiveEpisode = EpisodeLoader.GetRandomEpisode(LogFile, Controls)
         Optimizer.zero_grad() # Gradients have to be reset each episode, otherwise they accumulate over all previous episodes
         Loss, LossInfo = ProtoNet.CalculateLoss(ActiveEpisode)

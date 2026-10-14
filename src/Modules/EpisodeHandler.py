@@ -23,13 +23,14 @@ class EpisodeLoader():
         self.ValidationIndices  : dict = {}
         self.ValidationFeatures : dict = {}
 
-    def Initialize(self, LogFile):
+    def Initialize(self, LogFile, Controls):
         self.MaximumAvailableTiles = len(self.Images[self.Samples[0]][self.Classes[0]]["Training"]["Names"])
         self.CombinedClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
         if not 2 <= self.NumberOfClassesPerEpisode <= len(self.CombinedClasses):
             self.NumberOfClassesPerEpisode = len(self.CombinedClasses)
             print(f"2 <= KC (= {len(self.CombinedClasses)}) <= K (= {self.NumberOfClassesPerEpisode}) untrue.\nSetting KC = K")
             LogFile.W(f"WARNING! 2 <= KC (= {len(self.CombinedClasses)}) <= K (= {self.NumberOfClassesPerEpisode}) untrue - Setting KC = K")
+        
         self.CalculateEpisodeSize("Training", LogFile)
         self.SplitDataSet()
 
@@ -132,6 +133,6 @@ class EpisodeLoader():
         Episode["ValidationLabels"] = torch.cat(ValidationLabels)   # Dim: Number of validation images of the selected classes. Labels follow the episode's class order
 
         if Controls.WriteDetailedDebugInfo:
-            LOG.TrainingEpisode(LogFile, EpisodeIndices, Episode)
+            LOG.TrainingEpisode(LogFile, Episode, self.LookUpTable)
 
         return Episode

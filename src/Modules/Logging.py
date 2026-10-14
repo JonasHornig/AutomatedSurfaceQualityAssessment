@@ -67,7 +67,7 @@ def GenerateEncoder(Log, FeatureDimension, EmbeddingDimension, NumberOfHiddenLay
         Log.W(f"{Dimension:>4}", NewLine=False)
     Log.W("]")
 
-def Training(Log, Controls):
+def TrainingSettings(Log, Controls, EpisodeLoader):
     Log.W("\nStart main training loop\n==========================")
     Log.W("*-------------------------------------------------------------*")
     Log.W("| Parameter                           | Variable | Value      |")
@@ -83,38 +83,40 @@ def Training(Log, Controls):
     Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<10} |")
     #Log.W(f"| Validation Fraction                 |          | {Controls.ValidationFraction:<10} |") # changed
     Log.W("*-------------------------------------------------------------*")
-
-def ValidationSplit(Log, EpisodeLoader, DetailedLog: bool = False):
-    Log.W("\nHeld back validation images (never used as support or query samples)")
-    Log.W("*-------------------------------------------------*")
-    Log.W("| Class                | Training   | Validation  |")
-    Log.W("|----------------------|------------|-------------|")
-    for Class in EpisodeLoader.CombinedClasses:
-        Log.W(f"| {Class:<20} | {len(EpisodeLoader.TrainingIndices[Class]):<10} | {len(EpisodeLoader.ValidationIndices[Class]):<11} |")
-    Log.W("*-------------------------------------------------*")
-    if DetailedLog:
-        Log.W("Validation image indices within each class:")
-        for Class in EpisodeLoader.CombinedClasses:
-            Log.W(f"  {Class:<20} : {sorted(EpisodeLoader.ValidationIndices[Class].tolist())}")
-
-def WritelabelMap(Log, LabelMap):
-    Log.W("\n*------------------------------*")
+    
+    Log.W("\nLabel map")
+    Log.W("*------------------------------*")
     Log.W("| Class                | Label |")
     Log.W("|----------------------|-------|")
-    for Class in LabelMap.keys():
-        Log.W(f"| {Class:<20} | {LabelMap[Class]:<5} |")
+    for Class in EpisodeLoader.LabelMap.keys():
+        Log.W(f"| {Class:<20} | {EpisodeLoader.LabelMap[Class]:<5} |")
     Log.W("*------------------------------*")
 
-def TrainingEpisode(Log, EpisodeIndices, Episode):
-    # Image indices within each selected class, in episode order. The validation images are fixed and listed in the validation split.
-    Log.W(f"  Class                | Support indices | Query indices")
-    for Class, (SupportIndices, QueryIndices) in EpisodeIndices.items():
-        Log.W(f"  {Class:<20} | {SupportIndices} | {QueryIndices}")
+    Log.W("\nTraining / validation split")
+    if not Controls.WriteDetailedDebugInfo:
+        Log.W("*-------------------------------------------------*")
+        Log.W("| Class                | Training   | Validation  |")
+        Log.W("|----------------------|------------|-------------|")
+        for Class in EpisodeLoader.CombinedClasses:
+            Log.W(f"| {Class:<20} | {len(EpisodeLoader.TrainingIndices[Class]):<10} | {len(EpisodeLoader.ValidationIndices[Class]):<11} |")
+        Log.W("*-------------------------------------------------*")
+    else:
+        Log.W("Validation indices:")
+        for Class in EpisodeLoader.CombinedClasses:
+            Log.W(f"{Class:<20} :\nIndex : Tensor")
+            for Index in range(len(EpisodeLoader.ValidationFeatures[Class])):
+                Log.W(f"{Index:<5} : {FormatVector(EpisodeLoader.ValidationFeatures[Class][Index])}")
 
-    Log.W(f"\n  Tensor shapes:")
-    Log.W(f"  Support tensor   : [{Episode["SupportTensor"].size(0):>3}, {Episode["SupportTensor"].size(1):>3}, {Episode["SupportTensor"].size(2):>4}]")
-    Log.W(f"  Query tensor     : [{Episode["QueryTensor"].size(0):>3}, {Episode["QueryTensor"].size(1):>3}, {Episode["QueryTensor"].size(2):>4}]")
-    Log.W(f"  Validation tensor: [{Episode["ValidationTensor"].size(0):>8}, {Episode["ValidationTensor"].size(1):>4}]")
+def TrainingEpisode(Log, Episode, LookUpTable):
+    Log.W("\nEpisode details")
+    for ClassIndex in range(Episode["SupportTensor"].shape[0]):
+        Log.W(f"{LookUpTable[ClassIndex]} (Index {ClassIndex}):")
+        for TileIndex in range(Episode["SupportTensor"].shape[1]):
+            Log.W(f"{TileIndex:<5}: {FormatVector(Episode["SupportTensor"][ClassIndex][TileIndex])}")
+    for ClassIndex in range(Episode["QueryTensor"].shape[0]):
+        Log.W(f"{LookUpTable[ClassIndex]} (Index {ClassIndex}):")
+        for TileIndex in range(Episode["QueryTensor"].shape[1]):
+            Log.W(f"{TileIndex:<5}: {FormatVector(Episode["QueryTensor"][ClassIndex][TileIndex])}")
 
 def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy):
     NumberOfEpisodes = len(RunningAccuracy)
