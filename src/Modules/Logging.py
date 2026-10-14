@@ -81,7 +81,7 @@ def Training(Log, Controls):
     Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<10} |")
     Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<10} |")
     Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<10} |")
-    Log.W(f"| Validation Fraction                 |          | {Controls.ValidationFraction:<10} |")
+    #Log.W(f"| Validation Fraction                 |          | {Controls.ValidationFraction:<10} |") # changed
     Log.W("*-------------------------------------------------------------*")
 
 def ValidationSplit(Log, EpisodeLoader, DetailedLog: bool = False):
@@ -317,3 +317,10 @@ def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianc
     Figure.tight_layout()
     Figure.savefig(f"{Controls.OutputPath}/{Name}.png", dpi=300, bbox_inches="tight")
     plt.close(Figure)
+
+def DataSetHeader(LogFile):
+    LogFile.W("\nLoading data set\n==================")
+    LogFile.W("*---------------------------------------------------*")
+    LogFile.W("| Class      | Sample     | Mode       | Number     |")
+    LogFile.W("|            |            |            | of images  |")
+    LogFile.W("|------------|------------|------------|------------|")
