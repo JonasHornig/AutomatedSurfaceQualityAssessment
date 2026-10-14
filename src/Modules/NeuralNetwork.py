@@ -80,7 +80,7 @@ class ProtoNet():
         for Line in str(self.Encoder).split("\n"):
             Log.W(f"{Line}")
 
-        self.Prototypes = None
+        self.Prototypes = torch.Tensor()
 
     def GetMlpEncoder(self, Log):
         def MlpBlock(InputDimension, OutputDimension):
@@ -166,6 +166,7 @@ class ProtoNet():
         self.Encoder.train(WasTraining)
         self.Prototypes = torch.stack(Prototypes) # Dim: NumberOfClasses, EmbeddingDimension
 
+    '''
     def EvaluateAccuracy(self, Features, Labels) -> float:
         # Classifies the features with the final prototypes and returns the fraction of correct classifications. Labels follow the label map.
         WasTraining = self.Encoder.training
@@ -174,12 +175,12 @@ class ProtoNet():
             _, Classifications = EuclideanDistance(self.Encoder(Features), self.Prototypes).min(1)
         self.Encoder.train(WasTraining)
         return torch.eq(Classifications, Labels).float().mean().item()
+    '''
 
-    def SaveNetwork(self, Log, OutputPath: str):
+    def SaveNetwork(self, OutputPath: str):
         # The prototypes are ordered by the label map, which is saved separately as Labelmap.json
         torch.save(self.Encoder.state_dict(), f"{OutputPath}/TrainedProtoNet.pth")
         torch.save(self.Prototypes, f"{OutputPath}/PrototypeEmbedding.pth")
-        Log.W(f"\nSaved the encoder weights to {OutputPath}/TrainedProtoNet.pth and the prototypes {list(self.Prototypes.shape)} to {OutputPath}/PrototypeEmbedding.pth")
 
 def ComputeBatchSize(NumberOfImages: int, MaxBatchSize: int) -> tuple[int, int]:
     """

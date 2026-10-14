@@ -31,10 +31,14 @@ class DataSet():
         self.Samples : list[str] = []
         self.Modes   : list[str] = []
 
+        # Flasgs
+        self.ImagePropertiesChanged : bool = False
+
+        # Variable initialization
         self.DataSetPath : str  = ""
         self.DataSetName : str  = ""
-        self.TotalNumberOfImages    : int = 0
-        self.NumberOfResizedImages  : int = 0
+        self.TotalNumberOfImages   : int = 0
+        self.ChangedImages         : list[str] = []
 
     @property
     def FeatureDimension(self) -> int:
@@ -50,10 +54,9 @@ class DataSet():
         # Tiles are cut from the microscope images at full resolution and should already match the target size.
         # A mismatch indicates a tiling error, as resizing would blur the scratches the network is supposed to detect.
         if ValidatedImage.size != self.TargetImageSize:
-            Message = f"WARNING! - Image {ImageName} has size {ValidatedImage.size} instead of {self.TargetImageSize}. Resizing it."
-            print(Message)
-            LogFile.W(Message)
-            self.NumberOfResizedImages += 1
+            self.ChangedImages.append(ImageName)
+            if not self.ImagePropertiesChanged:
+                self.ImagePropertiesChanged = True
             ValidatedImage = ValidatedImage.resize(self.TargetImageSize)
         return ValidatedImage
 

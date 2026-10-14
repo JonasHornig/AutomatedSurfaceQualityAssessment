@@ -9,7 +9,6 @@ from matplotlib.lines import Line2D
 class NoteFile():
     def __init__(self, FilePath: str):
         self.FilePath = FilePath
-        os.makedirs(os.path.dirname(FilePath), exist_ok=True)
         self.File = open(FilePath, "w")
 
     def W(self, Text, NewLine: bool = True):
@@ -119,7 +118,7 @@ def TrainingEpisode(Log, EpisodeIndices, Episode):
 
 def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy):
     NumberOfEpisodes = len(RunningAccuracy)
-    Episodes = list(range(1, NumberOfEpisodes + 1)) # 1-based, as in the table and the csv file
+    Episodes = list(range(1, NumberOfEpisodes + 1))
 
     Log.W("\n*-------------------------------------------------*")
     Log.W("| Episode | Loss      | Training   | Validation   |")
@@ -138,7 +137,9 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
         Log.W(f"Loss mean                              : {LossMean:.3f}")
         Log.W(f"Loss standard deviation                : {LossStandardDeviation:.3f}")
         Log.W(f"Validation accuracy mean               : {ValAccMean:.3f} %")
-        Log.W(f"Validation accuracy standard deviation : {ValAccStandardDeviation:.3f} percentage points")
+        Log.W(f"Validation accuracy standard deviation : {ValAccStandardDeviation:.3f} %")
+
+    print(f"Final accuracy: Trainin accuracy = {round(100*RunningAccuracy[-1], 4)} %; Validation Accuracy = {round(100*RunningValidationAccuracy[-1], 4)}")
 
     with open(f"{Controls.OutputPath}/TrainingProcess.csv", "w") as TrainingProcessCsv:
         # Accuracies in %. Training accuracy is measured on the query samples, validation accuracy on the held back validation images
@@ -169,7 +170,7 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
     
     Lines1, Labels1 = LossAxis.get_legend_handles_labels()
     Lines2, Labels2 = AccuracyAxis.get_legend_handles_labels()
-    LossAxis.legend(Lines1 + Lines2, Labels1 + Labels2, loc="upper left")
+    LossAxis.legend(Lines1 + Lines2, Labels1 + Labels2, loc="center right")
     LossAxis.grid(True)
     plt.tight_layout()
     LossAxis.ticklabel_format(useOffset=False, style="plain")
@@ -186,46 +187,39 @@ def DataExtraction(Log, PreparedData):
     for Index in range(PreparedData["FeatureTensor"].shape[0]):
         Log.W(f"{Index:>5} {PreparedData["Names"][Index]:<50} {PreparedData["Labels"][Index]:<20} {PreparedData["LabelIndices"][Index]:<5} {FormatVector(PreparedData["FeatureTensor"][Index])}")
 
-def TestApplicationResults(Log, Data, LookUpTable):
+def TestApplicationResults(Log, Controls, TestHandler):
     Log.W("\nTest application of the proto net\n===================================")
     Log.W("*------------------------------------------------------------------------------------*")
     Log.W("| Index   | Correct Class              | Classification             | Confidence [%] |")
     Log.W("|---------|----------------------------|----------------------------|----------------|")
-    for Index in range(len(Data["Labels"])):
-        Log.W(f"| {Index:<7} | {Data["LabelIndices"][Index]:>3} - {Data["Labels"][Index]:<20} | {Data["Classifications"][Index]:>3} - {LookUpTable[Data["Classifications"][Index]]:<20} | {100*Data["Probabilities"][Index]:>14.3f} |")
+    for Index in range(len(TestHandler.PreparedData["Labels"])):
+        Log.W(f"| {Index:<7} | {TestHandler.PreparedData['LabelIndices'][Index]:>3} - {TestHandler.PreparedData['Labels'][Index]:<20} | {TestHandler.PreparedData['Classifications'][Index]:>3} - {TestHandler.LookUpTable[TestHandler.PreparedData['Classifications'][Index]]:<20} | {100*TestHandler.PreparedData['Probabilities'][Index]:>14.3f} |")
     Log.W("*------------------------------------------------------------------------------------*")
-    CorrectClassifications = [A == B for A, B in zip(Data["LabelIndices"], Data["Classifications"])]
+    CorrectClassifications = [A == B for A, B in zip(TestHandler.PreparedData["LabelIndices"], TestHandler.PreparedData["Classifications"])]
     Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
     Log.W(f"Accuracy = {Accuracy:.3f} %")
+    print(f"Total test accuracy = {round(Accuracy, 4)} %")
 
-def TestSummary(Log, Controls, ConfusionMatrix, LookUpTable):
-    '''
-    Per class accuracy and confusion matrix of the test set, also saved as ConfusionMatrix.csv.
-    The class names have the form <Material>_<SurfaceState>, so the matrix also gives the accuracy of telling
-    the surface states apart (regardless of the material) and of telling the materials apart (regardless of the surface state).
-    '''
-    ClassNames = [LookUpTable[Index] for Index in range(len(LookUpTable))]
-    Total      = ConfusionMatrix.sum()
+    ClassNames = [TestHandler.LookUpTable[Index] for Index in range(len(TestHandler.LookUpTable))]
+    Total      = TestHandler.PreparedData["ConfusionMatrix"].sum()
+
     def GroupAccuracy(Part):
         # Fraction of test images whose predicted class has the same material (Part 0) or surface state (Part 1) as the true class
-        return 100 * sum(ConfusionMatrix[True_, Predicted] for True_ in range(len(ClassNames)) for Predicted in range(len(ClassNames))
+        return 100 * sum(TestHandler.PreparedData["ConfusionMatrix"][True_, Predicted] for True_ in range(len(ClassNames)) for Predicted in range(len(ClassNames))
                          if ClassNames[True_].split("_", 1)[Part] == ClassNames[Predicted].split("_", 1)[Part]) / Total
 
     Log.W("\nTest results per class\n========================")
     Log.W("Confusion matrix (rows: true class, columns: predicted class)")
     Log.W(f"{"":<20} " + " ".join(f"{Index:>6}" for Index in range(len(ClassNames))) + " |  Images | Accuracy [%]")
     for Row, ClassName in enumerate(ClassNames):
-        Images = ConfusionMatrix[Row].sum()
-        Log.W(f"{Row:>2} {ClassName:<17} " + " ".join(f"{Count:>6}" for Count in ConfusionMatrix[Row]) + f" | {Images:>7} | {100*ConfusionMatrix[Row, Row]/Images:>12.3f}")
-    Message = (f"Accuracy: all classes {100*np.trace(ConfusionMatrix)/Total:.3f} %, "
-               f"surface state {GroupAccuracy(1):.3f} %, material {GroupAccuracy(0):.3f} %")
-    Log.W(Message)
-    print(Message)
+        Images = TestHandler.PreparedData["ConfusionMatrix"][Row].sum()
+        Log.W(f"{Row:>2} {ClassName:<17} " + " ".join(f"{Count:>6}" for Count in TestHandler.PreparedData["ConfusionMatrix"][Row]) + f" | {Images:>7} | {100*TestHandler.PreparedData["ConfusionMatrix"][Row, Row]/Images:>12.3f}")
+    Log.W(f"Accuracy: all classes {100*np.trace(TestHandler.PreparedData["ConfusionMatrix"])/Total:.3f} %, surface state {GroupAccuracy(1):.3f} %, material {GroupAccuracy(0):.3f} %")
 
     with open(f"{Controls.OutputPath}/ConfusionMatrix.csv", "w") as ConfusionMatrixCsv:
         ConfusionMatrixCsv.write("TrueClass," + ",".join(ClassNames) + "\n")
         for Row, ClassName in enumerate(ClassNames):
-            ConfusionMatrixCsv.write(f"{ClassName}," + ",".join(str(Count) for Count in ConfusionMatrix[Row]) + "\n")
+            ConfusionMatrixCsv.write(f"{ClassName}," + ",".join(str(Count) for Count in TestHandler.PreparedData["ConfusionMatrix"][Row]) + "\n")
 
 def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianceRatio, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
     '''
@@ -238,9 +232,53 @@ def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianc
     FallbackMarkers = ["s", "D", "v", "P"]
     TextColour      = "#1f1f1f"
     GridColour      = "#e3e3e3"
+    
+    MaterialMarkers = {"18201": "o", "22116": "^", "22348": "D"}
+    StateColours    = {"Polished": "#ac1313", "Scratched": "#3ae90e"}
+    
+    if len(TestHandler.Samples) > len(MaterialMarkers):
+        raise ValueError(f"Only {len(MaterialMarkers)} material markers available but got {len(TestHandler.Samples)} materials - extend MaterialMarkers in Logging.py")
+    
+    ClassColours  = {}
+    for Class in TestHandler.Classes:
+        ClassColours[Class] = StateColours.get(Class)
+    SampleMarkers = {}
+    for Sample in TestHandler.Samples:
+        SampleMarkers[Sample] = MaterialMarkers.get(Sample)
+    
+    Figure, Axis = plt.subplots(figsize=(12, 8))
+    Axis.set_title(Title, fontsize=18, color=TextColour)
+    Axis.set_xlabel(f"PC1 ({100*ExplainedVarianceRatio[0]:.2f}% of original variance)", fontsize=14, color=TextColour)
+    Axis.set_ylabel(f"PC2 ({100*ExplainedVarianceRatio[1]:.2f}% of original variance)", fontsize=14, color=TextColour)
+    Axis.grid(True, color=GridColour, linewidth=0.8)
+    Axis.set_axisbelow(True)
+    for Spine in Axis.spines.values():
+        Spine.set_color("#b0b0b0")
+    Axis.tick_params(colors="#555555")
 
+    # Examples
+    Labels = np.array(TestHandler.PreparedData["Labels"])
+    for Sample in TestHandler.Samples:
+        for Class in TestHandler.Classes:
+            Mask = Labels == f"{Sample}_{Class}"
+            Axis.scatter(Data[Mask, 0], Data[Mask, 1], s=25, c=ClassColours[Class], marker=SampleMarkers[Sample], alpha=0.5, zorder=2)
+
+    # Prototypes
+    for Index, Prototype in enumerate(Prototypes):
+        Sample, Class = TestHandler.LookUpTable[Index].split("_", 1)
+        Axis.scatter(Prototype[0], Prototype[1], s=200, c=ClassColours[Class], marker=SampleMarkers[Sample], edgecolors=TextColour, linewidths=1, zorder=3)
+
+    # Two separate legends, one per encoding, placed outside of the data area
+    MaterialHandles = [Line2D([], [], marker=SampleMarkers[Sample], linestyle="", markersize=11, markerfacecolor="#8a8a8a", markeredgecolor="white", label=Sample) for Sample in TestHandler.Samples]
+    StateHandles    = [Line2D([], [], marker="s", linestyle="", markersize=10, markerfacecolor=ClassColours[Class], markeredgecolor="white", label=Class) for Class in TestHandler.Classes]
+    StateHandles.append(Line2D([], [], marker="o", linestyle="", markersize=np.sqrt(200), markerfacecolor="#8a8a8a", markeredgecolor=TextColour, markeredgewidth=1, label="Class prototype"))
+    MaterialLegend = Axis.legend(handles=MaterialHandles, title="Material", loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour)
+    Axis.add_artist(MaterialLegend)
+    Axis.legend(handles=StateHandles, title="Surface state", loc="upper left", bbox_to_anchor=(1.02, 0.62), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour, labelspacing=1.0)
+
+    '''
     if len(TestHandler.Samples) > len(MaterialColours):
-        raise ValueError(f"Only {len(MaterialColours)} materials can be told apart reliably in one PCA plot, got {len(TestHandler.Samples)}")
+        raise ValueError(f"Only {len(MaterialColours)} material colours available but got {len(TestHandler.Samples)} materials - extend MaterialColours in Logging.py")
     SampleColour = {Sample: MaterialColours[Index] for Index, Sample in enumerate(TestHandler.Samples)}
     ClassMarker  = {}
     for Class in TestHandler.Classes:
@@ -260,7 +298,7 @@ def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianc
     for Sample in TestHandler.Samples:
         for Class in TestHandler.Classes:
             Mask = Labels == f"{Sample}_{Class}"
-            Axis.scatter(Data[Mask, 0], Data[Mask, 1], s=40, c=SampleColour[Sample], marker=ClassMarker[Class], alpha=0.75, edgecolors="white", linewidths=0.6, zorder=2)
+            Axis.scatter(Data[Mask, 0], Data[Mask, 1], s=25, c=SampleColour[Sample], marker=ClassMarker[Class], alpha=0.3, zorder=2)
 
     # Prototypes are ordered by the label map, so the look up table gives the class of each prototype
     for Index, Prototype in enumerate(Prototypes):
@@ -274,6 +312,7 @@ def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianc
     MaterialLegend = Axis.legend(handles=MaterialHandles, title="Material", loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour)
     Axis.add_artist(MaterialLegend)
     Axis.legend(handles=StateHandles, title="Surface state", loc="upper left", bbox_to_anchor=(1.02, 0.62), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour, labelspacing=1.0)
+    '''
 
     Figure.tight_layout()
     Figure.savefig(f"{Controls.OutputPath}/{Name}.png", dpi=300, bbox_inches="tight")
