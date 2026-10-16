@@ -23,7 +23,7 @@ class EpisodeLoader():
         self.ValidationIndices  : dict = {}
         self.ValidationFeatures : dict = {}
 
-    def Initialize(self, LogFile, Controls):
+    def Initialize(self, LogFile):
         self.MaximumAvailableTiles = len(self.Images[self.Samples[0]][self.Classes[0]]["Training"]["Names"])
         self.CombinedClasses = [f"{Sample}_{Class}" for Sample in self.Samples for Class in self.Classes]
         if not 2 <= self.NumberOfClassesPerEpisode <= len(self.CombinedClasses):
@@ -31,10 +31,18 @@ class EpisodeLoader():
             print(f"2 <= KC (= {len(self.CombinedClasses)}) <= K (= {self.NumberOfClassesPerEpisode}) untrue.\nSetting KC = K")
             LogFile.W(f"WARNING! 2 <= KC (= {len(self.CombinedClasses)}) <= K (= {self.NumberOfClassesPerEpisode}) untrue - Setting KC = K")
         
-        self.CalculateEpisodeSize("Training", LogFile)
+        self.CalculateEpisodeSize("Training")
         self.SplitDataSet()
 
-    def CalculateEpisodeSize(self, Mode, LogFile):
+    def GenerateLabelMap(self, OutputPath) -> None:
+        self.LabelMap = {}
+        for Index, Class in enumerate(self.CombinedClasses):
+            self.LabelMap[Class] = Index
+        self.LookUpTable = {v:k for k,v in self.LabelMap.items()}
+        with open(f"{OutputPath}/Labelmap.json", "w") as f:
+            json.dump(self.LabelMap, f)
+
+    def CalculateEpisodeSize(self, Mode):
         for Sample in self.Samples:
             for Class in self.Classes:
                 NumberOfExamples = len(self.Images[Sample][Class][Mode]["Names"])
@@ -77,6 +85,7 @@ class EpisodeLoader():
         Episodes only draw their support and query samples from the remaining images, so the validation images are never used for training.
         The split is drawn once, so the validation accuracy of all episodes is measured on the same images. It is reproducible through the seed.
         '''
+
         if not 0 < self.ValidationFraction < 1:
             self.ValidationFraction = 0.25
 
@@ -85,47 +94,36 @@ class EpisodeLoader():
             NumberOfImages           = len(self.Images[Sample][ClassName][Mode]["Names"])
             Indices = torch.randperm(NumberOfImages)
             self.TrainingIndices[Class]    = Indices[self.NumberOfValidationSamplesPerClass:]
-            self.TrainingFeatures[Class]   = [self.Images[Sample][ClassName][Mode]["DinoFeatures"][Index] for Index in self.TrainingIndices[Class]]
+            self.TrainingFeatures[Class]   = self.Images[Sample][ClassName][Mode]["DinoFeatures"][self.TrainingIndices[Class]]
             self.ValidationIndices[Class]  = Indices[:self.NumberOfValidationSamplesPerClass]
-            self.ValidationFeatures[Class] = [self.Images[Sample][ClassName][Mode]["DinoFeatures"][Index] for Index in self.ValidationIndices[Class]]
+            self.ValidationFeatures[Class] = self.Images[Sample][ClassName][Mode]["DinoFeatures"][self.ValidationIndices[Class]]
 
-    def GenerateLabelMap(self, OutputPath) -> None: # usage?
-        self.LabelMap = {}
-        for Index, Class in enumerate(self.CombinedClasses):
-            self.LabelMap[Class] = Index
-        self.LookUpTable = {v:k for k,v in self.LabelMap.items()}
-        with open(f"{OutputPath}/Labelmap.json", "w") as f:
-            json.dump(self.LabelMap, f)
-
-    def GetRandomEpisode(self, LogFile, Controls, Mode : str = "Training") -> dict: # usage?
+    def GetRandomEpisode(self, LogFile, Controls) -> dict:
         '''
-        Creates a random episode out of the provided data set
+        Creates a random episode with the shape [NC, NS, DINO feature dimension] out of the provided data set
         following Algorithm 1 from Snell et al. (2017)
         doi: doi.org/10.48550/arXiv.1703.05175
         '''
 
-        # Generate training tensors with the shape [NC, NS, DINO feature dimension]
         SelectedClasses = random.sample(self.CombinedClasses, self.NumberOfClassesPerEpisode)
         Episode = {}
         SupportTensors    = []
         QueryTensors      = []
         ValidationTensors = []
         ValidationLabels  = []
-        EpisodeIndices    = {} # {<Sample_Class> : (support indices, query indices)}, only used for the log
+
         for EpisodeLabel, Class in enumerate(SelectedClasses):
-            Sample, ClassName = Class.split("_", 1)
+            TrainingFeatures = self.TrainingFeatures[Class]
+            ShuffledIndices  = torch.randperm(len(TrainingFeatures))
+            NS = self.NumberOfSupportSamplesPerClass
+            NQ = self.NumberOfSupportSamplesPerClass + self.NumberOfQuerySamplesPerClass
+            SupportIndices   = ShuffledIndices[:NS]
+            QueryIndices     = ShuffledIndices[NS:NQ]
 
-            # Support and query samples are only drawn from the images that are not held back for validation
-            ShuffledIndices = torch.randperm(len(self.TrainingFeatures[Class]))
-            SupportIndices    : list[int] = ShuffledIndices[:self.NumberOfSupportSamplesPerClass].tolist()
-            QueryIndices      : list[int] = ShuffledIndices[self.NumberOfSupportSamplesPerClass:].tolist()
-            ValidationIndices : list[int] = self.ValidationIndices[Class].tolist()
-            EpisodeIndices[Class] = (SupportIndices, QueryIndices)
-
-            SupportTensors.append(torch.stack([self.TrainingFeatures[Class][Index] for Index in SupportIndices]))
-            QueryTensors.append(torch.stack([self.TrainingFeatures[Class][Index] for Index in QueryIndices]))
-            ValidationTensors.append(torch.stack(self.ValidationFeatures[Class]))
-            ValidationLabels.append( torch.full((len(ValidationIndices),), EpisodeLabel, dtype=torch.long))
+            SupportTensors.append(TrainingFeatures[SupportIndices])
+            QueryTensors.append(TrainingFeatures[QueryIndices])
+            ValidationTensors.append(self.ValidationFeatures[Class])
+            ValidationLabels.append(torch.full((len(self.ValidationFeatures[Class]),), EpisodeLabel, dtype=torch.long))
 
         Episode["SupportTensor"]    = torch.stack(SupportTensors)   # Dim: N_C, N_S, Feature dimension
         Episode["QueryTensor"]      = torch.stack(QueryTensors)     # Dim: N_C, N_Q, Feature dimension

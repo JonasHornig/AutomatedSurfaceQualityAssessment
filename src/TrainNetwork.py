@@ -83,7 +83,7 @@ def Main():
     Scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(Optimizer, T_max=Controls.NumberOfEpisodes)
 
     EpisodeLoader = EPH.EpisodeLoader(DataSet, Controls)
-    EpisodeLoader.Initialize(LogFile, Controls)
+    EpisodeLoader.Initialize(LogFile)
     EpisodeLoader.GenerateLabelMap(Controls.OutputPath)
     LOG.TrainingSettings(LogFile, Controls, EpisodeLoader)
 
