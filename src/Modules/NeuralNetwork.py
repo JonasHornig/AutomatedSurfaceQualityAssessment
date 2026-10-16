@@ -25,18 +25,16 @@ class DINOv3Model():
     def __init__(self, Name: str, ModelDirectory: str):
         if Name not in DINOV3_MODELS:
             raise ValueError(f"Unknown feature extractor {Name}. Available: {list(DINOV3_MODELS)}")
-        self.HubEntryPoint, self.WeightsName = DINOV3_MODELS[Name]
+        HubEntryPoint, WeightsName = DINOV3_MODELS[Name]
         self.Preprocessor = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # normalizing images the same way the DINOv3 (LVD-1689M) training images were normalized
-        self.Model = torch.hub.load(DINOV3_HUB_REPOSITORY, self.HubEntryPoint, weights=f"{ModelDirectory}/{self.WeightsName}")
-        self.LoadModel()
+        self.Model = torch.hub.load(DINOV3_HUB_REPOSITORY, HubEntryPoint, weights=f"{ModelDirectory}/{WeightsName}")
 
-    def LoadModel(self):
         assert isinstance(self.Model, nn.Module)
         self.Model.eval()
 
-    def ApplyNetwork(self, Images, Log, ProgressBar=None, DetailedLog=False, MaxBatchSize: int = 64):
+    def ApplyNetwork(self, Images, Log, ProgressBar=None, DetailedLog=False, MaxBatchSize: int = 64): # usage?
         """
         Extracts the DINOv3 features of one class and stores them as Images["DinoFeatures"] [Number of images, 768].
         Images["Images"] - list of PIL images
@@ -67,7 +65,7 @@ class DINOv3Model():
 
         Images["DinoFeatures"] = torch.cat(ExtractedFeatures, dim=0)  # Shape: [NumberOfImages, 768]
 
-class ProtoNet():
+class ProtoNet(): # usage?
     def __init__(self, Log, Controls, FeatureDimension: int):
         Log.W("\nCreating Proto Net\n====================")
 
@@ -83,6 +81,7 @@ class ProtoNet():
         self.Prototypes = torch.Tensor()
 
     def GetMlpEncoder(self, Log):
+        @staticmethod
         def MlpBlock(InputDimension, OutputDimension):
             return nn.Sequential(
                 nn.Linear(InputDimension, OutputDimension) ,
@@ -145,7 +144,7 @@ class ProtoNet():
             "Accuracy": Accuracy.item(),
             "ValidationAccuracy": ValidationAccuracy.item()}
 
-    def ComputePrototypes(self, Images, LabelMap, Indices: dict | None = None, Mode: str = "Training"):
+    def ComputePrototypes(self, Images, LabelMap, Mode: str = "Training"): # usage?
         '''
         Computes the final class prototypes after training as the mean embedding of the images of a class.
         Indices {<Sample_Class> : image indices} limits this to the given images, e.g. excluding the held back validation images. Without it all images are used.
@@ -159,23 +158,10 @@ class ProtoNet():
             for CombinedClass, _ in sorted(LabelMap.items(), key=lambda Entry: Entry[1]):
                 Sample, Class = CombinedClass.split("_", 1)
                 Features   = Images[Sample][Class][Mode]["DinoFeatures"]
-                if Indices is not None:
-                    Features = Features[Indices[CombinedClass]]
                 Embeddings = self.Encoder(Features)
                 Prototypes.append(Embeddings.mean(0))
         self.Encoder.train(WasTraining)
         self.Prototypes = torch.stack(Prototypes) # Dim: NumberOfClasses, EmbeddingDimension
-
-    '''
-    def EvaluateAccuracy(self, Features, Labels) -> float:
-        # Classifies the features with the final prototypes and returns the fraction of correct classifications. Labels follow the label map.
-        WasTraining = self.Encoder.training
-        self.Encoder.eval()
-        with torch.no_grad():
-            _, Classifications = EuclideanDistance(self.Encoder(Features), self.Prototypes).min(1)
-        self.Encoder.train(WasTraining)
-        return torch.eq(Classifications, Labels).float().mean().item()
-    '''
 
     def SaveNetwork(self, OutputPath: str):
         # The prototypes are ordered by the label map, which is saved separately as Labelmap.json
@@ -183,10 +169,6 @@ class ProtoNet():
         torch.save(self.Prototypes, f"{OutputPath}/PrototypeEmbedding.pth")
 
 def ComputeBatchSize(NumberOfImages: int, MaxBatchSize: int) -> tuple[int, int]:
-    """
-    Calculates an optimal batch size so that all batches are as even as possible
-    Formula: BatchSize = ceil(N / ceil(N / MaxBatchSize))
-    """
     NumberOfBatches = math.ceil(NumberOfImages / MaxBatchSize)
     EvenBatchSize   = math.ceil(NumberOfImages / NumberOfBatches)
     return int(EvenBatchSize), int(NumberOfBatches)

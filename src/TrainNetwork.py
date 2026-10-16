@@ -106,10 +106,10 @@ def Main():
         Optimizer.step()
         if Controls.UseLearningRateScheduler:
             Scheduler.step()
+    
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
-
-    # The final prototypes are computed from the training images only, so the held back validation images stay unseen
-    ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap, EpisodeLoader.TrainingIndices)
+    #ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap, EpisodeLoader.TrainingIndices)
+    ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap)
     ProtoNet.SaveNetwork(Controls.OutputPath)
 
     #ValidationFeatures, ValidationLabels = EpisodeLoader.GetValidationSet()
