@@ -21,6 +21,60 @@ DINOV3_MODELS = {
     "DINOv3-H16plus"   : ("dinov3_vith16plus", "dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth"), # 840 M, 1280
 }
 
+class DINOv2Model():
+    def __init__(self):
+        self.Preprocessor = transforms.Compose([
+            transforms.ToTensor()                                                           ,
+            transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # normalizing images the same way the DINO training images were normalized
+        self.Model = torch.hub.load('facebookresearch/dino:main', 'dino_vitb16')
+        self.LoadModel()
+
+    def LoadModel(self):
+        assert isinstance(self.Model, nn.Module)
+        self.Model.eval()
+
+    def ApplyNetwork(self, Images, Log, ProgressBar=None, DetailedLog=False):
+        """
+        Expects data as python dictionary (Images)
+        Images["Images"] - list of images
+          Loaded in testing with PIL
+        Images["Names"] - list of corresponding image names
+          It is important that both lists have the same order
+          From now on this will be assumed to be true
+        
+        Optional tqdm progress bar
+        """
+        
+        #AUX.ConfirmEqualLength(Images["Images"], Images["Names"])
+        
+        MaxBatchSize = 64
+        BatchSize, NumberOfBatches = ComputeBatchSize(NumberOfImages=len(Images["Images"]), MaxBatchSize=MaxBatchSize)
+        #LOG.ApplyDinoNetwork_FirstInstance(Log, MaxBatchSize, BatchSize, NumberOfBatches, DetailedLog, Images)
+
+        ExtractedFeatures: list[torch.Tensor] = []
+        for BatchIndex in range(NumberOfBatches):
+            if DetailedLog:
+                Log.W(f"        Batch Number {BatchIndex+1} out of {NumberOfBatches}")
+                Log.W(f"        Index Name                           Dimension   Feature Vector")
+            BatchedImages = Images["Images"][BatchIndex*BatchSize:(BatchIndex+1)*BatchSize]
+            BatchedNames  = Images["Names" ][BatchIndex*BatchSize:(BatchIndex+1)*BatchSize]
+            
+            PreprocessedBatch = torch.stack([self.Preprocessor(Entry) for Entry in BatchedImages])
+            with torch.no_grad():
+                BatchFeatures = self.Model(PreprocessedBatch) # type: ignore  --  Shape: [BatchSize, 768]
+
+            #LOG.ApplyDinoNetwork_SecondInstance(Log, DetailedLog, BatchedImages, BatchFeatures, BatchedNames)
+            
+            ExtractedFeatures.append(BatchFeatures)
+            
+            if ProgressBar:
+                ProgressBar.update(len(BatchedImages))
+        
+        FeatureTensor = torch.cat(ExtractedFeatures, dim=0)  # Shape: [NumberOfImages, 768]
+        Images["DinoFeatures"] = FeatureTensor
+
+        #LOG.ApplyDinoNetwork_ThirdInstance(DetailedLog, Log, FeatureTensor, Images)
+
 class DINOv3Model():
     def __init__(self, Name: str, ModelDirectory: str):
         if Name not in DINOV3_MODELS:
