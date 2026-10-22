@@ -65,3 +65,77 @@ def PrincipalComponentAnalysis(Controls, TestHandler, NumberOfComponents: int = 
     Embeddings = TestHandler.PreparedData["Embeddings"].numpy()
     Pca        = PCA(n_components=NumberOfComponents).fit(Embeddings)
     LOG.PlotPrincipalComponentAnalysis(Controls, TestHandler, Pca.transform(Embeddings), Pca.explained_variance_ratio_, "PCA_Embeddings", Pca.transform(TestHandler.Prototypes.numpy()), Title="Embeddings (Test data & Prototypes)")
+
+def OcclusionSensitivity(
+    Controls     : ControlVariables,
+    ProtoNet     : ProtoNet,
+    LabelMap     : dict,
+    ImageName    : str,
+    Sample       : str,
+    Class        : str,
+    Mode         : str,
+    WindowSize   : int = 32,
+    Stride       : int = 16,
+) -> np.ndarray:
+    """
+    Schiebt ein Fenster über das Bild, verdeckt den Bereich mit der
+    Durchschnittsfarbe und misst die Änderung der Softmax-Konfidenz
+    der vorhergesagten Klasse.
+    Gibt eine Heatmap der Form [ImageHeight, ImageWidth] zurück.
+    """
+    # --- Bild laden ---
+    ImagePath = f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{ImageName}"
+    PilImage  = Image.open(ImagePath).convert("RGB")
+    ImageArray = np.array(PilImage)                          # [H, W, 3]
+    ImageHeight, ImageWidth = ImageArray.shape[:2]
+    MeanColor = ImageArray.mean(axis=(0, 1)).astype(np.uint8)  # [3]
+
+    # --- Konfidenz des unveränderten Bildes als Referenz ---
+    def GetConfidence(PilImg: Image.Image) -> float:
+        DinoPreprocessor = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        InputTensor = DinoPreprocessor(PilImg).unsqueeze(0)   # [1, 3, H, W]
+        with torch.no_grad():
+            DinoFeatures = ProtoNet.DinoModel(InputTensor)    # [1, 768]
+            Embedding    = ProtoNet.Encoder(DinoFeatures)     # [1, EmbeddingDim]
+            Distances    = EuclideanDistance(Embedding, ProtoNet.Prototypes)  # [1, NC]
+            Probabilities = F.softmax(-Distances, dim=1)      # [1, NC]
+
+        # Index der vorhergesagten Klasse aus LabelMap
+        CombinedKey    = f"{Sample}_{Class}"
+        PredictedIndex = LabelMap[CombinedKey]
+        return Probabilities[0, PredictedIndex].item()
+
+    BaselineConfidence = GetConfidence(PilImage)
+
+    # --- Sliding Window ---
+    HeatMap = np.zeros((ImageHeight, ImageWidth), dtype=np.float32)
+    Counts  = np.zeros((ImageHeight, ImageWidth), dtype=np.float32)
+
+    YPositions = range(0, ImageHeight - WindowSize + 1, Stride)
+    XPositions = range(0, ImageWidth  - WindowSize + 1, Stride)
+
+    for YPosition in tqdm(YPositions, desc="Occlusion rows", leave=False):
+        for XPosition in XPositions:
+            OccludedArray = ImageArray.copy()
+            OccludedArray[
+                YPosition : YPosition + WindowSize,
+                XPosition : XPosition + WindowSize,
+            ] = MeanColor
+
+            OccludedImage      = Image.fromarray(OccludedArray)
+            OccludedConfidence = GetConfidence(OccludedImage)
+            ConfidenceDrop     = BaselineConfidence - OccludedConfidence
+
+            HeatMap[YPosition : YPosition + WindowSize,
+                    XPosition : XPosition + WindowSize] += ConfidenceDrop
+            Counts[ YPosition : YPosition + WindowSize,
+                    XPosition : XPosition + WindowSize] += 1
+
+    # Durchschnitt über überlappende Fenster
+    Counts[Counts == 0] = 1
+    HeatMap /= Counts
+
+    return HeatMap, BaselineConfidence

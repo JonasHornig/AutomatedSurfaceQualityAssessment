@@ -219,8 +219,8 @@ __marimo__/
 
 # Manual edits
 src/DataSets/CompleteDataSet/Images/
-src/DataSets/DummyDataSet/Images/
-src/DataSets/SmallDataSet/Images/
+src/DataSets/DummyDataSet/
+src/DataSets/SmallDataSet/
 src/Outputs/
 # DINOv3 weights (gated, download separately)
 *.pth
