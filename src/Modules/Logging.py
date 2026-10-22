@@ -122,24 +122,25 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
     NumberOfEpisodes = len(RunningAccuracy)
     Episodes = list(range(1, NumberOfEpisodes + 1))
 
-    Log.W("\n*-------------------------------------------------*")
-    Log.W("| Episode | Loss      | Training   | Validation   |")
-    Log.W("|         |           | Accuracy % | Accuracy %   |")
-    Log.W("|---------|-----------|------------|--------------|")
-    for Index in range(NumberOfEpisodes):
-        Log.W(f"| {Index+1:<7} | {RunningLoss[Index]:>9.6f} | {100*RunningAccuracy[Index]:>10.3f} | {100*RunningValidationAccuracy[Index]:>12.3f} |")
-    Log.W("*-------------------------------------------------*")
+    if Controls.WriteDetailedDebugInfo:
+        Log.W("\n*-------------------------------------------------*")
+        Log.W("| Episode | Loss      | Training   | Validation   |")
+        Log.W("|         |           | Accuracy % | Accuracy %   |")
+        Log.W("|---------|-----------|------------|--------------|")
+        for Index in range(NumberOfEpisodes):
+            Log.W(f"| {Index+1:<7} | {RunningLoss[Index]:>9.6f} | {100*RunningAccuracy[Index]:>10.3f} | {100*RunningValidationAccuracy[Index]:>12.3f} |")
+        Log.W("*-------------------------------------------------*")
     StandardDeviationCutOff = int(NumberOfEpisodes/10)
     if StandardDeviationCutOff > 0:
         LossMean                = np.mean(RunningLoss[-StandardDeviationCutOff:])
         LossStandardDeviation   = np.std(RunningLoss[-StandardDeviationCutOff:])
         ValAccMean              = np.mean([100*Entry for Entry in RunningValidationAccuracy[-StandardDeviationCutOff:]])
         ValAccStandardDeviation = np.std([100*Entry for Entry in RunningValidationAccuracy[-StandardDeviationCutOff:]])
-        Log.W(f"Statistics over the last 10% of training episodes ({StandardDeviationCutOff} episodes)")
-        Log.W(f"Loss mean                              : {LossMean:.3f}")
-        Log.W(f"Loss standard deviation                : {LossStandardDeviation:.3f}")
-        Log.W(f"Validation accuracy mean               : {ValAccMean:.3f} %")
-        Log.W(f"Validation accuracy standard deviation : {ValAccStandardDeviation:.3f} %")
+        Log.W(f"\nStatistics over the last 10% of training episodes ({StandardDeviationCutOff} episodes)")
+        Log.W(f"Loss mean                              : {LossMean:7.3f}")
+        Log.W(f"Loss standard deviation                : {LossStandardDeviation:7.3f}")
+        Log.W(f"Validation accuracy mean               : {ValAccMean:7.3f} %")
+        Log.W(f"Validation accuracy standard deviation : {ValAccStandardDeviation:7.3f} %")
 
     print(f"Final accuracy: Trainin accuracy = {round(100*RunningAccuracy[-1], 4)} %; Validation Accuracy = {round(100*RunningValidationAccuracy[-1], 4)}")
 
@@ -191,12 +192,13 @@ def DataExtraction(Log, PreparedData):
 
 def TestApplicationResults(Log, Controls, TestHandler):
     Log.W("\nTest application of the proto net\n===================================")
-    Log.W("*------------------------------------------------------------------------------------*")
-    Log.W("| Index   | Correct Class              | Classification             | Confidence [%] |")
-    Log.W("|---------|----------------------------|----------------------------|----------------|")
-    for Index in range(len(TestHandler.PreparedData["Labels"])):
-        Log.W(f"| {Index:<7} | {TestHandler.PreparedData['LabelIndices'][Index]:>3} - {TestHandler.PreparedData['Labels'][Index]:<20} | {TestHandler.PreparedData['Classifications'][Index]:>3} - {TestHandler.LookUpTable[TestHandler.PreparedData['Classifications'][Index]]:<20} | {100*TestHandler.PreparedData['Probabilities'][Index]:>14.3f} |")
-    Log.W("*------------------------------------------------------------------------------------*")
+    if Controls.WriteDetailedDebugInfo:
+        Log.W("*------------------------------------------------------------------------------------*")
+        Log.W("| Index   | Correct Class              | Classification             | Confidence [%] |")
+        Log.W("|---------|----------------------------|----------------------------|----------------|")
+        for Index in range(len(TestHandler.PreparedData["Labels"])):
+            Log.W(f"| {Index:<7} | {TestHandler.PreparedData['LabelIndices'][Index]:>3} - {TestHandler.PreparedData['Labels'][Index]:<20} | {TestHandler.PreparedData['Classifications'][Index]:>3} - {TestHandler.LookUpTable[TestHandler.PreparedData['Classifications'][Index]]:<20} | {100*TestHandler.PreparedData['Probabilities'][Index]:>14.3f} |")
+        Log.W("*------------------------------------------------------------------------------------*")
     CorrectClassifications = [A == B for A, B in zip(TestHandler.PreparedData["LabelIndices"], TestHandler.PreparedData["Classifications"])]
     Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
     Log.W(f"Accuracy = {Accuracy:.3f} %")

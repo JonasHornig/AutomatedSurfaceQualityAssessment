@@ -16,7 +16,7 @@ class TestHandler():
         self.LookUpTable : dict         = EpisodeLoader.LookUpTable
         self.Prototypes  : torch.Tensor = Network.Prototypes
 
-    def ExtractData(self, LogFile, Controls, Mode="Testing"):
+    def ExtractData(self, LogFile, Controls, Mode="Testing"): # usage?
         # Generates one flat feature tensor with the shape [Total number of images, DINO feature dimension].
         # The classes are concatenated instead of stacked, so they can contain different numbers of images.
         # Row i of the tensor belongs to entry i of Names, Labels and LabelIndices.
