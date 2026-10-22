@@ -1,4 +1,9 @@
+import numpy as np
+from PIL import Image
+
 import torch
+import torch.nn.functional as F
+from torchvision import transforms
 
 from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix
@@ -16,7 +21,7 @@ class TestHandler():
         self.LookUpTable : dict         = EpisodeLoader.LookUpTable
         self.Prototypes  : torch.Tensor = Network.Prototypes
 
-    def ExtractData(self, LogFile, Controls, Mode="Testing"): # usage?
+    def ExtractData(self, LogFile, Controls, Mode="Testing"):
         # Generates one flat feature tensor with the shape [Total number of images, DINO feature dimension].
         # The classes are concatenated instead of stacked, so they can contain different numbers of images.
         # Row i of the tensor belongs to entry i of Names, Labels and LabelIndices.
@@ -35,11 +40,20 @@ class TestHandler():
         if Controls.WriteDetailedDebugInfo:
             LOG.DataExtraction(LogFile, self.PreparedData)
 
+        for Img in self.Images["18201"]["Polished"]["Training"]["Names"]:
+            if "2310602045" in Img:
+                print(f"Training: {Img}")
+
+        for Img in self.Images["18201"]["Polished"]["Testing"]["Names"]:
+            if "2310602045" in Img:
+                print(f"Testing: {Img}")
+
 def NetworkTestMain(LogFile, Controls, ProtoNet, TestHandler):
     LogFile.W("\n******************************\n*   Testing the Proto Net    *\n******************************")
     print("\nTesting the trained network")
     NetworkTestApplication(LogFile, Controls, ProtoNet, TestHandler)
     PrincipalComponentAnalysis(Controls, TestHandler)
+    OcclusionSensitivity(LogFile, Controls, ProtoNet, TestHandler)
 
 def NetworkTestApplication(LogFile, Controls, Network, TestHandler):
     TestHandler.ExtractData(LogFile, Controls, "Testing")
@@ -66,31 +80,19 @@ def PrincipalComponentAnalysis(Controls, TestHandler, NumberOfComponents: int = 
     Pca        = PCA(n_components=NumberOfComponents).fit(Embeddings)
     LOG.PlotPrincipalComponentAnalysis(Controls, TestHandler, Pca.transform(Embeddings), Pca.explained_variance_ratio_, "PCA_Embeddings", Pca.transform(TestHandler.Prototypes.numpy()), Title="Embeddings (Test data & Prototypes)")
 
-def OcclusionSensitivity(
-    Controls     : ControlVariables,
-    ProtoNet     : ProtoNet,
-    LabelMap     : dict,
-    ImageName    : str,
-    Sample       : str,
-    Class        : str,
-    Mode         : str,
-    WindowSize   : int = 32,
-    Stride       : int = 16,
-) -> np.ndarray:
-    """
-    Schiebt ein Fenster über das Bild, verdeckt den Bereich mit der
-    Durchschnittsfarbe und misst die Änderung der Softmax-Konfidenz
-    der vorhergesagten Klasse.
-    Gibt eine Heatmap der Form [ImageHeight, ImageWidth] zurück.
-    """
-    # --- Bild laden ---
-    ImagePath = f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{ImageName}"
-    PilImage  = Image.open(ImagePath).convert("RGB")
-    ImageArray = np.array(PilImage)                          # [H, W, 3]
-    ImageHeight, ImageWidth = ImageArray.shape[:2]
-    MeanColor = ImageArray.mean(axis=(0, 1)).astype(np.uint8)  # [3]
+def OcclusionSensitivity(LogFile, Controls, ProtoNet, TestHandler, Index: int = 0, Mode: str = "Testing", WindowSize: int = 64, Stride: int = 16):
+    Label      = TestHandler.PreparedData["Labels"][Index]
+    Sample     = Label.split("_")[0]
+    Class      = Label.split("_")[1]
+    Name       = TestHandler.PreparedData["Names"][Index]
+    ImagePath  = f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{Name}"
 
-    # --- Konfidenz des unveränderten Bildes als Referenz ---
+    print(Name)
+
+    PilImage   = Image.open(ImagePath).convert("RGB")
+    ImageArray = np.array(PilImage)
+    ImageHeight, ImageWidth = ImageArray.shape[:2]
+
     def GetConfidence(PilImg: Image.Image) -> float:
         DinoPreprocessor = transforms.Compose([
             transforms.ToTensor(),
@@ -100,26 +102,24 @@ def OcclusionSensitivity(
         with torch.no_grad():
             DinoFeatures = ProtoNet.DinoModel(InputTensor)    # [1, 768]
             Embedding    = ProtoNet.Encoder(DinoFeatures)     # [1, EmbeddingDim]
-            Distances    = EuclideanDistance(Embedding, ProtoNet.Prototypes)  # [1, NC]
+            Distances    = NN.EuclideanDistance(Embedding, ProtoNet.Prototypes)  # [1, NC]
             Probabilities = F.softmax(-Distances, dim=1)      # [1, NC]
 
-        # Index der vorhergesagten Klasse aus LabelMap
-        CombinedKey    = f"{Sample}_{Class}"
-        PredictedIndex = LabelMap[CombinedKey]
+        PredictedIndex = TestHandler.LabelMap[Label]
         return Probabilities[0, PredictedIndex].item()
 
     BaselineConfidence = GetConfidence(PilImage)
 
-    # --- Sliding Window ---
     HeatMap = np.zeros((ImageHeight, ImageWidth), dtype=np.float32)
     Counts  = np.zeros((ImageHeight, ImageWidth), dtype=np.float32)
 
     YPositions = range(0, ImageHeight - WindowSize + 1, Stride)
     XPositions = range(0, ImageWidth  - WindowSize + 1, Stride)
 
-    for YPosition in tqdm(YPositions, desc="Occlusion rows", leave=False):
+    for YPosition in YPositions:
         for XPosition in XPositions:
             OccludedArray = ImageArray.copy()
+            MeanColor = ImageArray[YPosition : YPosition + WindowSize, XPosition : XPosition + WindowSize,].mean(axis=(0, 1)).astype(np.uint8)
             OccludedArray[
                 YPosition : YPosition + WindowSize,
                 XPosition : XPosition + WindowSize,
@@ -134,7 +134,6 @@ def OcclusionSensitivity(
             Counts[ YPosition : YPosition + WindowSize,
                     XPosition : XPosition + WindowSize] += 1
 
-    # Durchschnitt über überlappende Fenster
     Counts[Counts == 0] = 1
     HeatMap /= Counts
 
