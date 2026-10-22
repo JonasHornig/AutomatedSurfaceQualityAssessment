@@ -38,12 +38,13 @@ class ControlVariables:
     NumberOfQuerySamplesPerClass   : int   = 10    # N_Q
 
     # Outputs
-    RunName : str = "" # Name of the output folder Outputs/<RunName>/. Empty: date and time of the start of the run, so runs never overwrite each other
+    RunName : str = "TestRun" # Empty input generates a run name based on time and date
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo : bool = False     # Enabling this may severely impact performance
-    GenerateRandomSeed     : bool = False
+    WriteDetailedDebugInfo   : bool = False     # Enabling this may severely impact performance
+    OverwriteExistingResults : bool = True
+    GenerateRandomSeed       : bool = False
 
     def __post_init__(self):
         BaseDirectory = os.path.dirname(os.path.abspath(__file__))
@@ -108,15 +109,8 @@ def Main():
             Scheduler.step()
     
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
-    #ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap, EpisodeLoader.TrainingIndices)
     ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap)
     ProtoNet.SaveNetwork(Controls.OutputPath)
-
-    #ValidationFeatures, ValidationLabels = EpisodeLoader.GetValidationSet()
-    #FinalValidationAccuracy = ProtoNet.EvaluateAccuracy(ValidationFeatures, ValidationLabels)
-    #Message = f"Final validation accuracy (final prototypes, {len(ValidationLabels)} held back training images): {100*FinalValidationAccuracy:.3f} %"
-    #print(Message)
-    #LogFile.W(f"\n{Message}")
 
     TestHandler = TEST.TestHandler(DataSet, EpisodeLoader, ProtoNet)
     TEST.NetworkTestMain(LogFile, Controls, ProtoNet, TestHandler)

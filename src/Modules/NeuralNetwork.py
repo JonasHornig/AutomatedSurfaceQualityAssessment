@@ -65,7 +65,7 @@ class DINOv3Model():
 
         Images["DinoFeatures"] = torch.cat(ExtractedFeatures, dim=0)  # Shape: [NumberOfImages, 768]
 
-class ProtoNet(): # usage?
+class ProtoNet():
     def __init__(self, Log, Controls, FeatureDimension: int):
         Log.W("\nCreating Proto Net\n====================")
 
@@ -144,7 +144,7 @@ class ProtoNet(): # usage?
             "Accuracy": Accuracy.item(),
             "ValidationAccuracy": ValidationAccuracy.item()}
 
-    def ComputePrototypes(self, Images, LabelMap, Mode: str = "Training"): # usage?
+    def ComputePrototypes(self, Images, LabelMap, Mode: str = "Training"):
         '''
         Computes the final class prototypes after training as the mean embedding of the images of a class.
         Indices {<Sample_Class> : image indices} limits this to the given images, e.g. excluding the held back validation images. Without it all images are used.
