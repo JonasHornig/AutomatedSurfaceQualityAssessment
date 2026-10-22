@@ -94,7 +94,10 @@ def Main(LogFile, Controls):
                 LOG.LogHdf5Write(LogFile, Controls, HdfFile)
 
     if len(DataSet.ChangedImages) > 0:
-        LogFile.W(f"\nWARNING! - {len(DataSet.ChangedImages)} images did not match the target size of [{Controls.TargetImageSize[0]} x {Controls.TargetImageSize[1]}].")
+        Message = (f"WARNING! - {len(DataSet.ChangedImages)} of {DataSet.TotalNumberOfImages} images did not match the target size of "
+                   f"[{Controls.TargetImageSize[0]} x {Controls.TargetImageSize[1]}] and were resized. Check the tiling.")
+        LogFile.W(f"\n{Message}\n" + "\n".join(DataSet.ChangedImages))
+        print(f"{Message} See the log file.")
 
 if __name__ == "__main__":
     print("")

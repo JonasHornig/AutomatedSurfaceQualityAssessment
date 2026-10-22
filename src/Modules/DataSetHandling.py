@@ -35,11 +35,8 @@ class DataSet():
         # Variable initialization
         self.DataSetPath : str  = ""
         self.DataSetName : str  = ""
-        self.TotalNumberOfImages   : int = 0
-        self.ChangedImages         : list[str] = []
-
-        # Flags
-        self.ImagePropertiesChanged : bool = False
+        self.TotalNumberOfImages : int       = 0
+        self.ChangedImages       : list[str] = [] # Images that did not match the target size and were resized, reported by PreprocessImages.py
 
     @property
     def FeatureDimension(self) -> int:
@@ -55,8 +52,6 @@ class DataSet():
         # A mismatch indicates a tiling error, as resizing would blur the scratches the network is supposed to detect.
         if ValidatedImage.size != self.TargetImageSize:
             self.ChangedImages.append(ImageName)
-            if not self.ImagePropertiesChanged:
-                self.ImagePropertiesChanged = True
             ValidatedImage = ValidatedImage.resize(self.TargetImageSize)
         return ValidatedImage
 
@@ -93,20 +88,20 @@ class DataSet():
         for Sample in self.Samples:
             self.Images[Sample] = {}
             SamplePath = f"{BasePath}/{Sample}"
-            self.Classes = [Entry for Entry in sorted(os.listdir(SamplePath)) if os.path.isdir(os.path.join(SamplePath, Entry))]
 
+            self.Classes = [Entry for Entry in sorted(os.listdir(SamplePath)) if os.path.isdir(os.path.join(SamplePath, Entry))]
             for Class in self.Classes:
                 self.Images[Sample][Class] = {}
                 ClassPath = f"{SamplePath}/{Class}"
-                self.Modes = [Entry for Entry in sorted(os.listdir(ClassPath)) if os.path.isdir(os.path.join(ClassPath, Entry))]
 
+                self.Modes = [Entry for Entry in sorted(os.listdir(ClassPath)) if os.path.isdir(os.path.join(ClassPath, Entry))]
                 for Mode in self.Modes:
                     ImageNames = [Entry for Entry in sorted(os.listdir(f"{ClassPath}/{Mode}")) if Entry.endswith(".tif")]
                     self.Images[Sample][Class][Mode] = {"Images": [], "Names": ImageNames}
                     self.TotalNumberOfImages += len(ImageNames)
                 
-                    LogFile.W(f"| {Class:<10} | {Sample:<10} | {Mode:<10} | {str(len(ImageNames)):<10} |")
-        LogFile.W("*---------------------------------------------------*")
+                    LogFile.W(f"| {Class:<10} | {Sample:<26} | {Mode:<10} | {str(len(ImageNames)):<10} |")
+        LogFile.W("*-------------------------------------------------------------------*")
         LogFile.W(f"Number of samples: {len(self.Samples)} - {self.Samples}")
         LogFile.W(f"Number of classes: {len(self.Classes)} - {self.Classes}")
         LogFile.W(f"Number of modes  : {len(self.Modes)} - {self.Modes}")
@@ -124,11 +119,8 @@ class DataSet():
                 self.Samples.append(Sample)
                 self.Images[Sample] = {}
 
-                self.Classes = list(HdfFile.keys()) # type: ignore
-                if "MetaData" in self.Classes:
-                    self.Classes.remove("MetaData")
-                
-                for Class in self.Classes:
+                # Every sample is loaded with the classes of its own file, they are compared after loading
+                for Class in [Key for Key in HdfFile.keys() if Key != "MetaData"]:
                     self.Images[Sample][Class] = {}
                     for Mode in list(HdfFile[Class].keys()): # type: ignore
                         self.Images[Sample][Class][Mode] = {
@@ -136,12 +128,23 @@ class DataSet():
                             "Names"        : [Name.decode("utf-8") for Name in HdfFile[f"{Class}/{Mode}/Names"][:]] } # type: ignore
                         self.TotalNumberOfImages += len(self.Images[Sample][Class][Mode]["Names"])
 
-                        LogFile.W(f"| {Class:<10} | {Sample:<10} | {Mode:<10} | {str(len(self.Images[Sample][Class][Mode]["Names"])):<10} |")
+                        LogFile.W(f"| {Class:<10} | {Sample:<26} | {Mode:<10} | {str(len(self.Images[Sample][Class][Mode]["Names"])):<10} |")
 
-        LogFile.W("*---------------------------------------------------*")
+        LogFile.W("*-------------------------------------------------------------------*")
+
         self.Samples = list(dict.fromkeys(self.Samples))
+
+        # The episodes and the label map assume the same classes for every sample
+        ClassesPerSample = {Sample: list(self.Images[Sample]) for Sample in self.Samples}
+        self.Classes     = ClassesPerSample[self.Samples[0]]
+        if any(Classes != self.Classes for Classes in ClassesPerSample.values()):
+            Message = ("All samples need the same classes, but the feature files contain:\n"
+                       + "\n".join(f"    {Sample}: {Classes}" for Sample, Classes in ClassesPerSample.items())
+                       + "\nCheck the class folders of the images and extract the features again with PreprocessImages.py.")
+            LogFile.W(f"ERROR! - {Message}")
+            raise ValueError(Message)
+
         LogFile.W(f"Number of samples: {len(self.Samples)} - {self.Samples}")
-        self.Classes = list(dict.fromkeys(self.Classes))
         LogFile.W(f"Number of classes: {len(self.Classes)} - {self.Classes}")
         LogFile.W(f"Total number of images: {self.TotalNumberOfImages}")
         LogFile.W(f"Loaded from HDF5 files.")
