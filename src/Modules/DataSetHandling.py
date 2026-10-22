@@ -10,7 +10,8 @@ class DataSet():
     '''
     Master image handler class
     Assumes: 
-        - Sorted data set. An image can be found under its Directory MyDataSet/Images/ImageSample/ImageClass/UserMode/ImageName.tif
+        - Sorted data set. An image can be found under its Directory <DATASETNAME>/Images/ImageSample/ImageClass/UsageMode/ImageName.tif
+        - Balanced data set. Meaning the same classes and modes for each input sample.
     
     Dictionary order:
         {<Sample> : 
@@ -31,14 +32,17 @@ class DataSet():
         self.Samples : list[str] = []
         self.Modes   : list[str] = []
 
+        # Variable initialization
         self.DataSetPath : str  = ""
         self.DataSetName : str  = ""
-        self.TotalNumberOfImages    : int = 0
-        self.NumberOfResizedImages  : int = 0
+        self.TotalNumberOfImages   : int = 0
+        self.ChangedImages         : list[str] = []
+
+        # Flags
+        self.ImagePropertiesChanged : bool = False
 
     @property
     def FeatureDimension(self) -> int:
-        # Length of the DINO feature vectors, read from the first loaded class
         Sample, Class = self.Samples[0], self.Classes[0]
         Mode          = next(iter(self.Images[Sample][Class]))
         return self.Images[Sample][Class][Mode]["DinoFeatures"].shape[1]
@@ -50,21 +54,14 @@ class DataSet():
         # Tiles are cut from the microscope images at full resolution and should already match the target size.
         # A mismatch indicates a tiling error, as resizing would blur the scratches the network is supposed to detect.
         if ValidatedImage.size != self.TargetImageSize:
-            Message = f"WARNING! - Image {ImageName} has size {ValidatedImage.size} instead of {self.TargetImageSize}. Resizing it."
-            print(Message)
-            LogFile.W(Message)
-            self.NumberOfResizedImages += 1
+            self.ChangedImages.append(ImageName)
+            if not self.ImagePropertiesChanged:
+                self.ImagePropertiesChanged = True
             ValidatedImage = ValidatedImage.resize(self.TargetImageSize)
         return ValidatedImage
 
     def LoadDataSet(self, LogFile, Controls, ForceLoadImages: bool = False):
-        # Assumes that the data set is balanced, meaning the same classes and modes for each input sample.
-
-        LogFile.W("\nLoading data set\n==================")
-        LogFile.W("*---------------------------------------------------*")
-        LogFile.W("| Class      | Sample     | Mode       | Number     |")
-        LogFile.W("|            |            |            | of images  |")
-        LogFile.W("|------------|------------|------------|------------|")
+        LOG.DataSetHeader(LogFile)
 
         self.DataSetPath = Controls.DataSetPath
         self.DataSetName = Controls.DataSet
@@ -85,19 +82,49 @@ class DataSet():
             LogFile.W(f"ERROR! - {Message}")
             raise FileNotFoundError(Message)
 
+    def LoadDataSetImages(self, LogFile, WriteDetailedDebugInfo: bool = True):
+        '''
+        Collects only image names. The images are loaded dynamically when creating the batches for pre-processing to conserve memory usage.
+        '''
+
+        BasePath = f"{self.DataSetPath}/Images"
+
+        self.Samples = [Entry for Entry in sorted(os.listdir(BasePath)) if os.path.isdir(os.path.join(BasePath, Entry))]
+        for Sample in self.Samples:
+            self.Images[Sample] = {}
+            SamplePath = f"{BasePath}/{Sample}"
+            self.Classes = [Entry for Entry in sorted(os.listdir(SamplePath)) if os.path.isdir(os.path.join(SamplePath, Entry))]
+
+            for Class in self.Classes:
+                self.Images[Sample][Class] = {}
+                ClassPath = f"{SamplePath}/{Class}"
+                self.Modes = [Entry for Entry in sorted(os.listdir(ClassPath)) if os.path.isdir(os.path.join(ClassPath, Entry))]
+
+                for Mode in self.Modes:
+                    ImageNames = [Entry for Entry in sorted(os.listdir(f"{ClassPath}/{Mode}")) if Entry.endswith(".tif")]
+                    self.Images[Sample][Class][Mode] = {"Images": [], "Names": ImageNames}
+                    self.TotalNumberOfImages += len(ImageNames)
+                
+                    LogFile.W(f"| {Class:<10} | {Sample:<10} | {Mode:<10} | {str(len(ImageNames)):<10} |")
+        LogFile.W("*---------------------------------------------------*")
+        LogFile.W(f"Number of samples: {len(self.Samples)} - {self.Samples}")
+        LogFile.W(f"Number of classes: {len(self.Classes)} - {self.Classes}")
+        LogFile.W(f"Number of modes  : {len(self.Modes)} - {self.Modes}")
+        LogFile.W(f"Total number of images: {self.TotalNumberOfImages}")
+        LogFile.W(f"Loaded from raw images")
+
+        if WriteDetailedDebugInfo:
+            LogFile.W("\nStructure of the read image dictionary:")
+            LOG.LogDict(LogFile, self.Images)
+
     def LoadDataSetFromHdfFile(self, LogFile, WriteDetailedDebugInfo: bool = True):
-        Warnings = []
-        
         for HdfFileName in self.HdfFiles:
             with h5py.File(f"{self.DataSetPath}/{HdfFileName}", "r") as HdfFile:
                 Sample = HdfFileName.split("_")[1]
                 self.Samples.append(Sample)
                 self.Images[Sample] = {}
 
-                if self.Classes and not all(Class in list(HdfFile.keys()) for Class in self.Classes):
-                    Warnings.append(f"Classes for sample {self.Samples[-2]}: {self.Classes} - Classes for sample {self.Samples[-1]}: {list(HdfFile.keys())}")
-                else:
-                    self.Classes = list(HdfFile.keys()) # type: ignore
+                self.Classes = list(HdfFile.keys()) # type: ignore
                 if "MetaData" in self.Classes:
                     self.Classes.remove("MetaData")
                 
@@ -117,44 +144,7 @@ class DataSet():
         self.Classes = list(dict.fromkeys(self.Classes))
         LogFile.W(f"Number of classes: {len(self.Classes)} - {self.Classes}")
         LogFile.W(f"Total number of images: {self.TotalNumberOfImages}")
-        LogFile.W(f"Loaded from HDF5 file")
-
-        for Entry in Warnings:
-            Message = f"WARNING! - Samples contain different classes. {Entry}"
-            print(Message)
-            LogFile.W(Message)
-
-        if WriteDetailedDebugInfo:
-            LogFile.W("\nStructure of the read image dictionary:")
-            LOG.LogDict(LogFile, self.Images)
-
-    def LoadDataSetImages(self, LogFile, WriteDetailedDebugInfo: bool = True):
-        BasePath = f"{self.DataSetPath}/Images"
-
-        # Only the image names are collected here. The images themselves are opened one class at a time by PreprocessImages.py, to limit the memory use.
-        self.Samples = [Entry for Entry in sorted(os.listdir(BasePath)) if os.path.isdir(os.path.join(BasePath, Entry))]
-        for Sample in self.Samples:
-            self.Images[Sample] = {}
-            SamplePath = f"{BasePath}/{Sample}"
-
-            self.Classes = [Entry for Entry in sorted(os.listdir(SamplePath)) if os.path.isdir(os.path.join(SamplePath, Entry))]
-            for Class in self.Classes:
-                self.Images[Sample][Class] = {}
-                ClassPath = f"{SamplePath}/{Class}"
-
-                self.Modes = [Entry for Entry in sorted(os.listdir(ClassPath)) if os.path.isdir(os.path.join(ClassPath, Entry))]
-                for Mode in self.Modes:
-                    ImageNames = [Entry for Entry in sorted(os.listdir(f"{ClassPath}/{Mode}")) if Entry.endswith(".tif")]
-                    self.Images[Sample][Class][Mode] = {"Images": [], "Names": ImageNames}
-                    self.TotalNumberOfImages += len(ImageNames)
-                
-                    LogFile.W(f"| {Class:<10} | {Sample:<10} | {Mode:<10} | {str(len(ImageNames)):<10} |")
-        LogFile.W("*---------------------------------------------------*")
-        LogFile.W(f"Number of samples: {len(self.Samples)} - {self.Samples}")
-        LogFile.W(f"Number of classes: {len(self.Classes)} - {self.Classes}")
-        LogFile.W(f"Number of modes  : {len(self.Modes)} - {self.Modes}")
-        LogFile.W(f"Total number of images: {self.TotalNumberOfImages}")
-        LogFile.W(f"Loaded from raw images")
+        LogFile.W(f"Loaded from HDF5 files.")
 
         if WriteDetailedDebugInfo:
             LogFile.W("\nStructure of the read image dictionary:")

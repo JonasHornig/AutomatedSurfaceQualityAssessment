@@ -16,11 +16,11 @@ class TestHandler():
         self.LookUpTable : dict         = EpisodeLoader.LookUpTable
         self.Prototypes  : torch.Tensor = Network.Prototypes
 
-    def ExtractData(self, LogFile, Controls, Mode="Testing"):
+    def ExtractData(self, LogFile, Controls, Mode="Testing"): # usage?
         # Generates one flat feature tensor with the shape [Total number of images, DINO feature dimension].
         # The classes are concatenated instead of stacked, so they can contain different numbers of images.
         # Row i of the tensor belongs to entry i of Names, Labels and LabelIndices.
-        self.PreparedData = {"Names": [], "Labels": [], "LabelIndices": []}
+        self.PreparedData = {"Names": [], "Labels": [], "LabelIndices": [], "FeatureTensor": torch.Tensor()}
         ClassTensors = []
         for Sample in self.Samples:
             for Class in self.Classes:
@@ -52,21 +52,16 @@ def NetworkTestApplication(LogFile, Controls, Network, TestHandler):
     Probabilities, Classifications = torch.softmax(-DistanceMatrix, dim=1).max(1)
     TestHandler.PreparedData["Probabilities"]   = Probabilities.tolist()
     TestHandler.PreparedData["Classifications"] = Classifications.tolist()
+    TestHandler.PreparedData["ConfusionMatrix"] = confusion_matrix(TestHandler.PreparedData["LabelIndices"], TestHandler.PreparedData["Classifications"], labels=list(range(len(TestHandler.LookUpTable))))
 
-    LOG.TestApplicationResults(LogFile, TestHandler.PreparedData, TestHandler.LookUpTable)
-
-    # Rows: true class, columns: predicted class, both in label map order
-    ConfusionMatrix = confusion_matrix(TestHandler.PreparedData["LabelIndices"], TestHandler.PreparedData["Classifications"], labels=list(range(len(TestHandler.LookUpTable))))
-    LOG.TestSummary(LogFile, Controls, ConfusionMatrix, TestHandler.LookUpTable)
+    LOG.TestApplicationResults(LogFile, Controls, TestHandler)
 
 def PrincipalComponentAnalysis(Controls, TestHandler, NumberOfComponents: int = 2):
     # Each PCA is fitted on the test set it shows. The prototypes are projected with the PCA of the embeddings.
     Features = TestHandler.PreparedData["FeatureTensor"].numpy()
     Pca      = PCA(n_components=NumberOfComponents).fit(Features)
-    LOG.PlotPrincipalComponentAnalysis(Controls, TestHandler, Pca.transform(Features), Pca.explained_variance_ratio_,
-                                       "PCA_DinoFeatures", Title="PCA of the DINO features (test set)")
+    LOG.PlotPrincipalComponentAnalysis(Controls, TestHandler, Pca.transform(Features), Pca.explained_variance_ratio_, "PCA_DinoFeatures", Title="Extracted Features")
 
     Embeddings = TestHandler.PreparedData["Embeddings"].numpy()
     Pca        = PCA(n_components=NumberOfComponents).fit(Embeddings)
-    LOG.PlotPrincipalComponentAnalysis(Controls, TestHandler, Pca.transform(Embeddings), Pca.explained_variance_ratio_,
-                                       "PCA_Embeddings", Pca.transform(TestHandler.Prototypes.numpy()), Title="PCA of the embeddings (test set) with class prototypes")
+    LOG.PlotPrincipalComponentAnalysis(Controls, TestHandler, Pca.transform(Embeddings), Pca.explained_variance_ratio_, "PCA_Embeddings", Pca.transform(TestHandler.Prototypes.numpy()), Title="Embeddings (Test data & Prototypes)")
