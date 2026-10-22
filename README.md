@@ -240,17 +240,15 @@ src/DataSets/AdditionalPrototypes/<Material>_<State>/*.tif                 e.g. 
 ```
 
 ```bash
-python src/AddNewMaterialPrototype.py <Material> --network <RunName> [--skip-existing-check] [--ignore-validation]
+python src/AddNewMaterialPrototype.py <Material> --network <RunName> [--skip-existing-check]
 ```
 
 Every folder becomes one prototype, the mean embedding of the tiles of its images, so separate references (e.g. one per
-grit) show which scratches remain. Step 1 checks whether the existing prototypes already classify at least 95 % of the
-reference tiles correctly; then nothing is added (`--skip-existing-check` continues anyway). In step 2 every image is
-held out once (a single image: each half of it) and must be classified correctly with the new prototypes built without
-it. If this validation passes (`--ignore-validation` adds the prototypes even below 95 %, with a warning in the log and
-`"ValidationPassed": false` in `Settings.json`), the network with the existing and the new prototypes is written to
-`src/Outputs/<RunName>+<Material>/` and is used like any training run, e.g. `ClassifyImage.py --network <RunName>+<Material>`. The log `AddNewMaterialPrototype.log` lists
-the results of both steps. `PCA_NewPrototypes.png` and the interactive `PCA_NewPrototypes.html` (with a preview of
+grit) show which scratches remain. The script first checks whether the existing prototypes already classify at least
+95 % of the reference tiles correctly; then nothing is added (`--skip-existing-check` continues anyway). Otherwise the
+network with the existing and the new prototypes is written to `src/Outputs/<RunName>+<Material>/` and is used like any
+training run, e.g. `ClassifyImage.py --network <RunName>+<Material>`. The log `AddNewMaterialPrototype.log` lists
+the check. `PCA_NewPrototypes.png` and the interactive `PCA_NewPrototypes.html` (with a preview of
 every reference tile) show the reference tiles and the new prototypes in the PCA of the test set (the same PCA as in the
 training run), also when nothing is added. For these, the test set of the training materials is classified with the
 existing and the new prototypes (`TestSet.log`, `ConfusionMatrix.csv`); the log reports how many test images are closest
