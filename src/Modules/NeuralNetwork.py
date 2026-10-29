@@ -5,7 +5,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 
+import json
 import math
+import sys
+
+from types import SimpleNamespace
 
 from . import Logging as LOG
 
@@ -25,16 +29,20 @@ class DINOv3Model():
     def __init__(self, Name: str, ModelDirectory: str):
         if Name not in DINOV3_MODELS:
             raise ValueError(f"Unknown feature extractor {Name}. Available: {list(DINOV3_MODELS)}")
-        HubEntryPoint, WeightsName = DINOV3_MODELS[Name]
+        self.HubEntryPoint, self.WeightsName = DINOV3_MODELS[Name]
         self.Preprocessor = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(  mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) , ]) # normalizing images the same way the DINOv3 (LVD-1689M) training images were normalized
-        self.Model = torch.hub.load(DINOV3_HUB_REPOSITORY, HubEntryPoint, weights=f"{ModelDirectory}/{WeightsName}")
+        # DINOv3 runs on an NVIDIA GPU if PyTorch was installed with CUDA, otherwise on the CPU. The features are returned on the CPU,
+        # where the small embedding network runs (a GPU doesn't speed it up)
+        self.Device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.Model = torch.hub.load(DINOV3_HUB_REPOSITORY, self.HubEntryPoint, weights=f"{ModelDirectory}/{self.WeightsName}").to(self.Device)
+        print(f"{Name} runs on the " + (f"GPU ({torch.cuda.get_device_name(self.Device)})" if self.Device.type == "cuda" else "CPU"), file=sys.stderr) # stderr keeps the JSON output of ClassifyImage clean
 
         assert isinstance(self.Model, nn.Module)
         self.Model.eval()
 
-    def ApplyNetwork(self, Images, Log, ProgressBar=None, DetailedLog=False, MaxBatchSize: int = 64): # usage?
+    def ApplyNetwork(self, Images, Log, ProgressBar=None, DetailedLog=False, MaxBatchSize: int = 64):
         """
         Extracts the DINOv3 features of one class and stores them as Images["DinoFeatures"] [Number of images, 768].
         Images["Images"] - list of PIL images
@@ -54,7 +62,7 @@ class DINOv3Model():
 
             PreprocessedBatch = torch.stack([self.Preprocessor(Entry) for Entry in BatchedImages])
             with torch.no_grad():
-                BatchFeatures = self.Model(PreprocessedBatch) # type: ignore  --  Shape: [BatchSize, 768]
+                BatchFeatures = self.Model(PreprocessedBatch.to(self.Device)).cpu() # type: ignore  --  Shape: [BatchSize, 768]
 
             if DetailedLog:
                 LOG.FeatureBatch(Log, BatchIndex, NumberOfBatches, BatchedNames, BatchFeatures)
@@ -81,7 +89,6 @@ class ProtoNet():
         self.Prototypes = torch.Tensor()
 
     def GetMlpEncoder(self, Log):
-        @staticmethod
         def MlpBlock(InputDimension, OutputDimension):
             return nn.Sequential(
                 nn.Linear(InputDimension, OutputDimension) ,
@@ -144,29 +151,51 @@ class ProtoNet():
             "Accuracy": Accuracy.item(),
             "ValidationAccuracy": ValidationAccuracy.item()}
 
-    def ComputePrototypes(self, Images, LabelMap, Mode: str = "Training"):
+    def ComputePrototypes(self, FeaturesPerClass: list[torch.Tensor]):
         '''
-        Computes the final class prototypes after training as the mean embedding of the images of a class.
-        Indices {<Sample_Class> : image indices} limits this to the given images, e.g. excluding the held back validation images. Without it all images are used.
-        The prototypes are ordered by the label map, so prototype k belongs to the class with label k.
+        Computes the final class prototypes after training as the mean embedding of the training images of each class.
+        FeaturesPerClass is ordered by the label map, so prototype k belongs to the class with label k.
         The prototypes of the individual episodes can't be used for this, as their order follows the random class selection of the episode.
         '''
         WasTraining = self.Encoder.training
         self.Encoder.eval()
-        Prototypes = []
         with torch.no_grad():
-            for CombinedClass, _ in sorted(LabelMap.items(), key=lambda Entry: Entry[1]):
-                Sample, Class = CombinedClass.split("_", 1)
-                Features   = Images[Sample][Class][Mode]["DinoFeatures"]
-                Embeddings = self.Encoder(Features)
-                Prototypes.append(Embeddings.mean(0))
+            Prototypes = [self.Encoder(Features).mean(0) for Features in FeaturesPerClass]
         self.Encoder.train(WasTraining)
         self.Prototypes = torch.stack(Prototypes) # Dim: NumberOfClasses, EmbeddingDimension
+
+    def Classify(self, Features) -> torch.Tensor:
+        # Label (in label map order) of the closest final prototype for every feature vector
+        WasTraining = self.Encoder.training
+        self.Encoder.eval()
+        with torch.no_grad():
+            _, Classifications = EuclideanDistance(self.Encoder(Features), self.Prototypes).min(1)
+        self.Encoder.train(WasTraining)
+        return Classifications
 
     def SaveNetwork(self, OutputPath: str):
         # The prototypes are ordered by the label map, which is saved separately as Labelmap.json
         torch.save(self.Encoder.state_dict(), f"{OutputPath}/TrainedProtoNet.pth")
         torch.save(self.Prototypes, f"{OutputPath}/PrototypeEmbedding.pth")
+
+    @staticmethod
+    def LoadNetwork(Log, RunPath: str) -> tuple["ProtoNet", dict, dict]:
+        '''
+        Rebuilds a trained network from the output folder of a training run (Settings.json, TrainedProtoNet.pth, PrototypeEmbedding.pth, Labelmap.json).
+        Returns the network in evaluation mode, the settings of the training run and the look up table {label : class name}.
+        '''
+        with open(f"{RunPath}/Settings.json") as SettingsFile:
+            Settings = json.load(SettingsFile)
+        with open(f"{RunPath}/Labelmap.json") as LabelMapFile:
+            LookUpTable = {Label: Class for Class, Label in json.load(LabelMapFile).items()}
+        Weights          = torch.load(f"{RunPath}/TrainedProtoNet.pth", weights_only=True)
+        FeatureDimension = next(Tensor for Tensor in Weights.values() if Tensor.dim() == 2).shape[1] # input width of the first linear layer
+
+        Network = ProtoNet(Log, SimpleNamespace(**Settings), FeatureDimension)
+        Network.Encoder.load_state_dict(Weights)
+        Network.Encoder.eval()
+        Network.Prototypes = torch.load(f"{RunPath}/PrototypeEmbedding.pth", weights_only=True)
+        return Network, Settings, LookUpTable
 
 def ComputeBatchSize(NumberOfImages: int, MaxBatchSize: int) -> tuple[int, int]:
     NumberOfBatches = math.ceil(NumberOfImages / MaxBatchSize)

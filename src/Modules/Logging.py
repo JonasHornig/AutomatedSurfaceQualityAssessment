@@ -5,10 +5,12 @@ import torch
 import matplotlib.pyplot as plt
 
 from matplotlib.lines import Line2D
+from types import SimpleNamespace
 
 class NoteFile():
     def __init__(self, FilePath: str):
         self.FilePath = FilePath
+        os.makedirs(os.path.dirname(FilePath), exist_ok=True)
         self.File = open(FilePath, "w")
 
     def W(self, Text, NewLine: bool = True):
@@ -21,6 +23,10 @@ class NoteFile():
     def __del__(self):
         if not self.File.closed:
             self.File.close()
+
+def NameWidth(Names, Minimum: int = 20) -> int:
+    # Column width for class names in the log tables: the longest name, but at least Minimum characters
+    return max([Minimum] + [len(str(Name)) for Name in Names])
 
 def LogDict(Log, Dictionary: dict, Indent: int = 0):
     for Key, Value in Dictionary.items():
@@ -81,42 +87,44 @@ def TrainingSettings(Log, Controls, EpisodeLoader):
     Log.W(f"| Number of Classes per Episode       | N_C      | {Controls.NumberOfClassesPerEpisode:<10} |")
     Log.W(f"| Number of Support Samples per Class | N_S      | {Controls.NumberOfSupportSamplesPerClass:<10} |")
     Log.W(f"| Number of Query Samples per Class   | N_Q      | {Controls.NumberOfQuerySamplesPerClass:<10} |")
-    #Log.W(f"| Validation Fraction                 |          | {Controls.ValidationFraction:<10} |") # changed
+    Log.W(f"| Validation Fraction                 |          | {Controls.ValidationFraction:<10} |")
+    Log.W(f"| Class Grouping                      |          | {Controls.ClassGrouping:<10} |")
     Log.W("*-------------------------------------------------------------*")
-    
+
     Log.W("\nLabel map")
-    Log.W("*------------------------------*")
-    Log.W("| Class                | Label |")
-    Log.W("|----------------------|-------|")
+    W = NameWidth(EpisodeLoader.LabelMap.keys())
+    Log.W(f"*{"-" * (W + 10)}*")
+    Log.W(f"| {"Class":<{W}} | Label |")
+    Log.W(f"|{"-" * (W + 2)}|-------|")
     for Class in EpisodeLoader.LabelMap.keys():
-        Log.W(f"| {Class:<20} | {EpisodeLoader.LabelMap[Class]:<5} |")
-    Log.W("*------------------------------*")
+        Log.W(f"| {Class:<{W}} | {EpisodeLoader.LabelMap[Class]:<5} |")
+    Log.W(f"*{"-" * (W + 10)}*")
 
-    Log.W("\nTraining / validation split")
-    if not Controls.WriteDetailedDebugInfo:
-        Log.W("*-------------------------------------------------*")
-        Log.W("| Class                | Training   | Validation  |")
-        Log.W("|----------------------|------------|-------------|")
+    Log.W("\nTraining / validation split (the validation images are never used as support or query samples)")
+    W = NameWidth(EpisodeLoader.CombinedClasses)
+    Log.W(f"*{"-" * (W + 29)}*")
+    Log.W(f"| {"Class":<{W}} | Training   | Validation  |")
+    Log.W(f"|{"-" * (W + 2)}|------------|-------------|")
+    for Class in EpisodeLoader.CombinedClasses:
+        Log.W(f"| {Class:<{W}} | {len(EpisodeLoader.TrainingIndices[Class]):<10} | {len(EpisodeLoader.ValidationIndices[Class]):<11} |")
+    Log.W(f"*{"-" * (W + 29)}*")
+    if Controls.WriteDetailedDebugInfo:
+        Log.W("Validation images (index within the class : feature vector):")
         for Class in EpisodeLoader.CombinedClasses:
-            Log.W(f"| {Class:<20} | {len(EpisodeLoader.TrainingIndices[Class]):<10} | {len(EpisodeLoader.ValidationIndices[Class]):<11} |")
-        Log.W("*-------------------------------------------------*")
-    else:
-        Log.W("Validation indices:")
-        for Class in EpisodeLoader.CombinedClasses:
-            Log.W(f"{Class:<20} :\nIndex : Tensor")
-            for Index in range(len(EpisodeLoader.ValidationFeatures[Class])):
-                Log.W(f"{Index:<5} : {FormatVector(EpisodeLoader.ValidationFeatures[Class][Index])}")
+            Sample, ClassName = Class.split("_", 1)
+            Features = EpisodeLoader.Images[Sample][ClassName]["Training"]["DinoFeatures"]
+            Log.W(f"{Class}")
+            for Index in sorted(EpisodeLoader.ValidationIndices[Class].tolist()):
+                Log.W(f"{Index:<5} : {FormatVector(Features[Index])}")
 
-def TrainingEpisode(Log, Episode, LookUpTable):
+def TrainingEpisode(Log, EpisodeImages, Episode):
+    # Support and query images of each selected class, in episode order. The validation images are fixed and listed in the training / validation split.
     Log.W("\nEpisode details")
-    for ClassIndex in range(Episode["SupportTensor"].shape[0]):
-        Log.W(f"{LookUpTable[ClassIndex]} (Index {ClassIndex}):")
-        for TileIndex in range(Episode["SupportTensor"].shape[1]):
-            Log.W(f"{TileIndex:<5}: {FormatVector(Episode["SupportTensor"][ClassIndex][TileIndex])}")
-    for ClassIndex in range(Episode["QueryTensor"].shape[0]):
-        Log.W(f"{LookUpTable[ClassIndex]} (Index {ClassIndex}):")
-        for TileIndex in range(Episode["QueryTensor"].shape[1]):
-            Log.W(f"{TileIndex:<5}: {FormatVector(Episode["QueryTensor"][ClassIndex][TileIndex])}")
+    for ClassIndex, (Class, (SupportImages, QueryImages)) in enumerate(EpisodeImages.items()):
+        for Kind, Images, Tensor in (("support", SupportImages, Episode["SupportTensor"]), ("query", QueryImages, Episode["QueryTensor"])):
+            Log.W(f"{Class} (episode label {ClassIndex}), {Kind} images:")
+            for TileIndex, Image in enumerate(Images):
+                Log.W(f"{str(Image):<5}: {FormatVector(Tensor[ClassIndex][TileIndex])}")
 
 def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy):
     NumberOfEpisodes = len(RunningAccuracy)
@@ -142,7 +150,7 @@ def PrintTrainingProcess(Log, Controls, RunningLoss, RunningAccuracy, RunningVal
         Log.W(f"Validation accuracy mean               : {ValAccMean:7.3f} %")
         Log.W(f"Validation accuracy standard deviation : {ValAccStandardDeviation:7.3f} %")
 
-    print(f"Final accuracy: Trainin accuracy = {round(100*RunningAccuracy[-1], 4)} %; Validation Accuracy = {round(100*RunningValidationAccuracy[-1], 4)}")
+    print(f"Last episode: training accuracy = {round(100*RunningAccuracy[-1], 4)} %, validation accuracy = {round(100*RunningValidationAccuracy[-1], 4)} %")
 
     with open(f"{Controls.OutputPath}/TrainingProcess.csv", "w") as TrainingProcessCsv:
         # Accuracies in %. Training accuracy is measured on the query samples, validation accuracy on the held back validation images
@@ -184,109 +192,154 @@ def DataExtraction(Log, PreparedData):
     Log.W("\nExtracting data from the data set for the test application")
     Log.W(f"Finished Tensor of shape [{PreparedData["FeatureTensor"].shape[0]}, {PreparedData["FeatureTensor"].shape[1]}]")
     Log.W("Number of images per class:")
+    W = NameWidth(PreparedData["Labels"])
     for Label in dict.fromkeys(PreparedData["Labels"]):
-        Log.W(f"    {Label:<20} {PreparedData["Labels"].count(Label):>6}")
-    Log.W("Extracted data:\nIndex Name                                               Label                Index Tensor")
+        Log.W(f"    {Label:<{W}} {PreparedData["Labels"].count(Label):>6}")
+    Log.W(f"Extracted data:\nIndex {"Name":<50} {"Label":<{W}} Index Tensor")
     for Index in range(PreparedData["FeatureTensor"].shape[0]):
-        Log.W(f"{Index:>5} {PreparedData["Names"][Index]:<50} {PreparedData["Labels"][Index]:<20} {PreparedData["LabelIndices"][Index]:<5} {FormatVector(PreparedData["FeatureTensor"][Index])}")
+        Log.W(f"{Index:>5} {PreparedData["Names"][Index]:<50} {PreparedData["Labels"][Index]:<{W}} {PreparedData["LabelIndices"][Index]:<5} {FormatVector(PreparedData["FeatureTensor"][Index])}")
 
 def TestApplicationResults(Log, Controls, TestHandler):
+    '''
+    Results on the test set: every image (only with WriteDetailedDebugInfo), the per class accuracy and the confusion matrix, also saved as ConfusionMatrix.csv.
+    Also reports the accuracy of telling the surface states apart (regardless of the material), the accuracy of telling
+    the materials apart (only if the classes are <Material>_<SurfaceState>), and the surface state confidence.
+    '''
+    Data, LookUpTable = TestHandler.PreparedData, TestHandler.LookUpTable
+    ConfusionMatrix   = Data["ConfusionMatrix"]
     Log.W("\nTest application of the proto net\n===================================")
     if Controls.WriteDetailedDebugInfo:
-        Log.W("*------------------------------------------------------------------------------------*")
-        Log.W("| Index   | Correct Class              | Classification             | Confidence [%] |")
-        Log.W("|---------|----------------------------|----------------------------|----------------|")
-        for Index in range(len(TestHandler.PreparedData["Labels"])):
-            Log.W(f"| {Index:<7} | {TestHandler.PreparedData['LabelIndices'][Index]:>3} - {TestHandler.PreparedData['Labels'][Index]:<20} | {TestHandler.PreparedData['Classifications'][Index]:>3} - {TestHandler.LookUpTable[TestHandler.PreparedData['Classifications'][Index]]:<20} | {100*TestHandler.PreparedData['Probabilities'][Index]:>14.3f} |")
-        Log.W("*------------------------------------------------------------------------------------*")
-    CorrectClassifications = [A == B for A, B in zip(TestHandler.PreparedData["LabelIndices"], TestHandler.PreparedData["Classifications"])]
+        W      = NameWidth(LookUpTable.values())
+        Border = f"*{"-" * (2 * W + 66)}*"
+        Log.W(Border)
+        Log.W(f"| Index   | {"Correct Class":<{W + 6}} | {"Classification":<{W + 6}} | Confidence [%] | State confidence [%] |")
+        Log.W(f"|---------|{"-" * (W + 8)}|{"-" * (W + 8)}|----------------|----------------------|")
+        for Index in range(len(Data["Labels"])):
+            Log.W(f"| {Index:<7} | {Data["LabelIndices"][Index]:>3} - {Data["Labels"][Index]:<{W}} | {Data["Classifications"][Index]:>3} - {LookUpTable[Data["Classifications"][Index]]:<{W}} | {100*Data["Probabilities"][Index]:>14.3f} | {100*Data["StateProbabilities"][Index]:>20.3f} |")
+        Log.W(Border)
+    CorrectClassifications = [A == B for A, B in zip(Data["LabelIndices"], Data["Classifications"])]
     Accuracy = 100*sum(CorrectClassifications) / len(CorrectClassifications)
     Log.W(f"Accuracy = {Accuracy:.3f} %")
-    print(f"Total test accuracy = {round(Accuracy, 4)} %")
 
-    ClassNames = [TestHandler.LookUpTable[Index] for Index in range(len(TestHandler.LookUpTable))]
-    Total      = TestHandler.PreparedData["ConfusionMatrix"].sum()
-
-    def GroupAccuracy(Part):
-        # Fraction of test images whose predicted class has the same material (Part 0) or surface state (Part 1) as the true class
-        return 100 * sum(TestHandler.PreparedData["ConfusionMatrix"][True_, Predicted] for True_ in range(len(ClassNames)) for Predicted in range(len(ClassNames))
-                         if ClassNames[True_].split("_", 1)[Part] == ClassNames[Predicted].split("_", 1)[Part]) / Total
+    ClassNames = [LookUpTable[Index] for Index in range(len(LookUpTable))]
+    Total      = ConfusionMatrix.sum()
 
     Log.W("\nTest results per class\n========================")
     Log.W("Confusion matrix (rows: true class, columns: predicted class)")
-    Log.W(f"{"":<20} " + " ".join(f"{Index:>6}" for Index in range(len(ClassNames))) + " |  Images | Accuracy [%]")
+    W = NameWidth(ClassNames, Minimum=17)
+    Log.W(f"{"":<{W + 3}} " + " ".join(f"{Index:>6}" for Index in range(len(ClassNames))) + " |  Images | Accuracy [%]")
     for Row, ClassName in enumerate(ClassNames):
-        Images = TestHandler.PreparedData["ConfusionMatrix"][Row].sum()
-        Log.W(f"{Row:>2} {ClassName:<17} " + " ".join(f"{Count:>6}" for Count in TestHandler.PreparedData["ConfusionMatrix"][Row]) + f" | {Images:>7} | {100*TestHandler.PreparedData["ConfusionMatrix"][Row, Row]/Images:>12.3f}")
-    Log.W(f"Accuracy: all classes {100*np.trace(TestHandler.PreparedData["ConfusionMatrix"])/Total:.3f} %, surface state {GroupAccuracy(1):.3f} %, material {GroupAccuracy(0):.3f} %")
+        Images = ConfusionMatrix[Row].sum()
+        Log.W(f"{Row:>2} {ClassName:<{W}} " + " ".join(f"{Count:>6}" for Count in ConfusionMatrix[Row]) + f" | {Images:>7} | " + (f"{100*ConfusionMatrix[Row, Row]/Images:>12.3f}" if Images else f"{'-':>12}")) # added prototypes have no test images
+
+    CorrectState  = [True_ == Predicted for True_, Predicted in zip(Data["TrueStates"], Data["PredictedStates"])]
+    StateAccuracy = 100 * sum(CorrectState) / len(CorrectState)
+    if all("_" in ClassName for ClassName in ClassNames):
+        Material = lambda Name: Name.split("_", 1)[0]
+        MaterialAccuracy = f"{100 * sum(ConfusionMatrix[True_, Predicted] for True_ in range(len(ClassNames)) for Predicted in range(len(ClassNames)) if Material(ClassNames[True_]) == Material(ClassNames[Predicted])) / Total:.3f} %"
+    else:
+        MaterialAccuracy = "not applicable"
+    Message = (f"Accuracy: all classes {100*np.trace(ConfusionMatrix)/Total:.3f} %, "
+               f"surface state {StateAccuracy:.3f} %, material {MaterialAccuracy}")
+    Log.W(Message)
+    print(Message)
+
+    # How confident the network is about the surface state, separately for correct and wrong surface states
+    Confidences = np.array(Data["StateProbabilities"]) * 100
+    Correct     = np.array(CorrectState)
+    Log.W(f"Surface state confidence: mean {Confidences[Correct].mean():.2f} % for correct, "
+          + (f"{Confidences[~Correct].mean():.2f} % for wrong surface states ({(~Correct).sum()} images)" if (~Correct).any() else "no wrong surface states"))
 
     with open(f"{Controls.OutputPath}/ConfusionMatrix.csv", "w") as ConfusionMatrixCsv:
         ConfusionMatrixCsv.write("TrueClass," + ",".join(ClassNames) + "\n")
         for Row, ClassName in enumerate(ClassNames):
-            ConfusionMatrixCsv.write(f"{ClassName}," + ",".join(str(Count) for Count in TestHandler.PreparedData["ConfusionMatrix"][Row]) + "\n")
+            ConfusionMatrixCsv.write(f"{ClassName}," + ",".join(str(Count) for Count in ConfusionMatrix[Row]) + "\n")
+
+def Darken(HexColour: str, Factor: float = 0.7) -> str:
+    # Same hue, lower lightness: every RGB channel is scaled by Factor
+    Red, Green, Blue = (int(HexColour[Index:Index + 2], 16) for Index in (1, 3, 5))
+    return "#" + "".join(f"{int(Channel * Factor):02x}" for Channel in (Red, Green, Blue))
+
+def Lighten(HexColour: str, Factor: float = 0.45) -> str:
+    # Same hue, higher lightness: every RGB channel moves the fraction Factor towards white
+    Red, Green, Blue = (int(HexColour[Index:Index + 2], 16) for Index in (1, 3, 5))
+    return "#" + "".join(f"{int(Channel + (255 - Channel) * Factor):02x}" for Channel in (Red, Green, Blue))
+
+def MaterialOf(ClassName: str) -> str:
+    # Class names are <Material>_<State>, <Material>_<Reference>_<State> (added prototypes) or <State> (pooled prototypes, ClassGrouping = State)
+    return ClassName.split("_")[0] if "_" in ClassName else ""
+
+def ClassStyle(Samples: list[str], Classes: list[str], Names: list[str] = []):
+    '''
+    Colour and marker of any class name, shared by all PCA plots (static and interactive):
+      colour = surface state (polished blue, scratched orange), so the two states are easy to tell apart
+      marker = material (circle, square, diamond for the training materials, further markers for added materials)
+      shade  = reference, if a material has several references with the same state (added prototypes, e.g. 1200 and 600 grit)
+    Names fixes the order in which the markers and shades are assigned, so all plots of a run use the same ones.
+    Returns a function Name -> (colour, marker), with the dictionaries MaterialMarker and StateColour as attributes (for legends).
+    '''
+    # Colour blind safe, assigned in the order of the classes (Polished, Scratched)
+    StateColour    = dict(zip(Classes, ["#2a78d6", "#eb6834", "#1baf7a", "#7b3fa0"]))
+    Markers        = ["o", "s", "D", "^", "v", "p", "<", ">"]
+    MaterialMarker = dict(zip(Samples, Markers))
+    Shades         = [lambda Colour: Colour, Darken, Lighten, lambda Colour: Darken(Colour, 0.45)]
+    References     = {}
+    def Style(Name: str) -> tuple[str, str]:
+        Material, State = MaterialOf(Name), Name.split("_")[-1]
+        if Material and Material not in MaterialMarker:
+            MaterialMarker[Material] = Markers[len(MaterialMarker) % len(Markers)]
+        Known = References.setdefault((Material, State), [])
+        if Name not in Known:
+            Known.append(Name)
+        return Shades[Known.index(Name) % len(Shades)](StateColour.get(State, "#8a8a8a")), MaterialMarker.get(Material, "*")
+    for Name in [f"{Sample}_{Class}" for Sample in Samples for Class in Classes] + Names:
+        Style(Name)
+    Style.MaterialMarker, Style.StateColour = MaterialMarker, StateColour
+    return Style
+
+def PlotValueDistribution(Values: dict, Threshold: float, Path: str, XLabel: str, LogScale: bool = False):
+    '''
+    Histogram of a score per tile, one panel per material, with the threshold from which a tile is scratched (score >= threshold).
+    Values: {(material, state): array}. Used for the surface state score of the network.
+    '''
+    Materials = list(dict.fromkeys(Material for Material, _ in Values))
+    Figure, Axes = plt.subplots(len(Materials), 1, figsize=(12, 2.6 * len(Materials)), sharex=True, squeeze=False)
+    Bins = np.linspace(min(Value.min() for Value in Values.values()), max(Value.max() for Value in Values.values()) + 1, 60)
+    for Axis, Material in zip(Axes[:, 0], Materials):
+        for State, Colour in (("Polished", "#2a78d6"), ("Scratched", "#eb6834")):
+            if (Material, State) in Values:
+                Value = Values[(Material, State)]
+                Wrong = (Value >= Threshold).sum() if State == "Polished" else (Value < Threshold).sum()
+                Axis.hist(Value, bins=Bins, color=Colour, alpha=0.6, label=f"{State} ({len(Value)}, {Wrong} on the wrong side)")
+        Axis.axvline(Threshold, color="#1f1f1f", linestyle="--", linewidth=1.2, label=f"Threshold {Threshold:g}")
+        Axis.set_title(Material, fontsize=11); Axis.set_ylabel("Tiles")
+        Axis.legend(frameon=False, fontsize=9, loc="upper left", bbox_to_anchor=(1.01, 1.0)) # outside, so it never covers the threshold
+        if LogScale:
+            Axis.set_yscale("log")
+    Axes[-1, 0].set_xlabel(XLabel)
+    Figure.tight_layout()
+    Figure.savefig(Path, dpi=150, bbox_inches="tight")
+    plt.close(Figure)
+
+def MisclassifiedMasks(Data) -> tuple[np.ndarray, np.ndarray]:
+    # Test images with a wrong surface state, and test images with the right surface state but the wrong class (i.e. the wrong material)
+    WrongState = np.array([True_ != Predicted for True_, Predicted in zip(Data["TrueStates"], Data["PredictedStates"])])
+    WrongClass = np.array([True_ != Predicted for True_, Predicted in zip(Data["LabelIndices"], Data["Classifications"])])
+    return WrongState, WrongClass & ~WrongState
 
 def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianceRatio, Name, Prototypes = [], Title:str = "Principal Component Analysis"):
     '''
-    Colour encodes the material (sample), the marker shape encodes the surface state (class).
-    Prototypes use the colour and shape of their class, drawn larger and with a dark outline.
+    Colour encodes the surface state, the marker shape the material, see ClassStyle.
+    Prototypes use the colour and shape of their class, drawn larger and with a red outline.
+    Misclassified test images are outlined: black for a wrong surface state, grey for a wrong material only.
     '''
-    # Colour blind safe categorical colours, validated as a set of three for scatter plots. Assigned in fixed sample order.
-    MaterialColours = ["#2a78d6", "#eb6834", "#1baf7a"]
-    StateMarkers    = {"Polished": "o", "Scratched": "^"}
-    FallbackMarkers = ["s", "D", "v", "P"]
+    LookUp          = TestHandler.LookUpTable
+    Style           = ClassStyle(TestHandler.Samples, TestHandler.Classes, [LookUp[Index] for Index in range(len(LookUp))])
     TextColour      = "#1f1f1f"
     GridColour      = "#e3e3e3"
-    
-    MaterialMarkers = {"18201": "o", "22116": "^", "22348": "D"}
-    StateColours    = {"Polished": "#ac1313", "Scratched": "#3ae90e"}
-    
-    if len(TestHandler.Samples) > len(MaterialMarkers):
-        raise ValueError(f"Only {len(MaterialMarkers)} material markers available but got {len(TestHandler.Samples)} materials - extend MaterialMarkers in Logging.py")
-    
-    ClassColours  = {}
-    for Class in TestHandler.Classes:
-        ClassColours[Class] = StateColours.get(Class)
-    SampleMarkers = {}
-    for Sample in TestHandler.Samples:
-        SampleMarkers[Sample] = MaterialMarkers.get(Sample)
-    
-    Figure, Axis = plt.subplots(figsize=(12, 8))
-    Axis.set_title(Title, fontsize=18, color=TextColour)
-    Axis.set_xlabel(f"PC1 ({100*ExplainedVarianceRatio[0]:.2f}% of original variance)", fontsize=14, color=TextColour)
-    Axis.set_ylabel(f"PC2 ({100*ExplainedVarianceRatio[1]:.2f}% of original variance)", fontsize=14, color=TextColour)
-    Axis.grid(True, color=GridColour, linewidth=0.8)
-    Axis.set_axisbelow(True)
-    for Spine in Axis.spines.values():
-        Spine.set_color("#b0b0b0")
-    Axis.tick_params(colors="#555555")
-
-    # Examples
-    Labels = np.array(TestHandler.PreparedData["Labels"])
-    for Sample in TestHandler.Samples:
-        for Class in TestHandler.Classes:
-            Mask = Labels == f"{Sample}_{Class}"
-            Axis.scatter(Data[Mask, 0], Data[Mask, 1], s=25, c=ClassColours[Class], marker=SampleMarkers[Sample], alpha=0.5, zorder=2)
-
-    # Prototypes
-    for Index, Prototype in enumerate(Prototypes):
-        Sample, Class = TestHandler.LookUpTable[Index].split("_", 1)
-        Axis.scatter(Prototype[0], Prototype[1], s=200, c=ClassColours[Class], marker=SampleMarkers[Sample], edgecolors=TextColour, linewidths=1, zorder=3)
-
-    # Two separate legends, one per encoding, placed outside of the data area
-    MaterialHandles = [Line2D([], [], marker=SampleMarkers[Sample], linestyle="", markersize=11, markerfacecolor="#8a8a8a", markeredgecolor="white", label=Sample) for Sample in TestHandler.Samples]
-    StateHandles    = [Line2D([], [], marker="s", linestyle="", markersize=10, markerfacecolor=ClassColours[Class], markeredgecolor="white", label=Class) for Class in TestHandler.Classes]
-    StateHandles.append(Line2D([], [], marker="o", linestyle="", markersize=np.sqrt(200), markerfacecolor="#8a8a8a", markeredgecolor=TextColour, markeredgewidth=1, label="Class prototype"))
-    MaterialLegend = Axis.legend(handles=MaterialHandles, title="Material", loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour)
-    Axis.add_artist(MaterialLegend)
-    Axis.legend(handles=StateHandles, title="Surface state", loc="upper left", bbox_to_anchor=(1.02, 0.62), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour, labelspacing=1.0)
-
-    '''
-    if len(TestHandler.Samples) > len(MaterialColours):
-        raise ValueError(f"Only {len(MaterialColours)} material colours available but got {len(TestHandler.Samples)} materials - extend MaterialColours in Logging.py")
-    SampleColour = {Sample: MaterialColours[Index] for Index, Sample in enumerate(TestHandler.Samples)}
-    ClassMarker  = {}
-    for Class in TestHandler.Classes:
-        ClassMarker[Class] = StateMarkers.get(Class, FallbackMarkers[len(ClassMarker) % len(FallbackMarkers)])
+    WrongStateEdge  = "#000000"
+    PrototypeEdge   = "#d00000"
+    WrongClassEdge  = "#7a7a7a"
 
     Figure, Axis = plt.subplots(figsize=(12, 8))
     Axis.set_title(Title, fontsize=18, color=TextColour)
@@ -298,33 +351,46 @@ def PlotPrincipalComponentAnalysis(Controls, TestHandler, Data, ExplainedVarianc
         Spine.set_color("#b0b0b0")
     Axis.tick_params(colors="#555555")
 
-    Labels = np.array(TestHandler.PreparedData["Labels"])
+    Members = np.array(TestHandler.PreparedData["Members"])
+    WrongState, WrongClassOnly = MisclassifiedMasks(TestHandler.PreparedData)
     for Sample in TestHandler.Samples:
         for Class in TestHandler.Classes:
-            Mask = Labels == f"{Sample}_{Class}"
-            Axis.scatter(Data[Mask, 0], Data[Mask, 1], s=25, c=SampleColour[Sample], marker=ClassMarker[Class], alpha=0.3, zorder=2)
+            Mask  = Members == f"{Sample}_{Class}"
+            Marks = dict(zip(("c", "marker"), Style(f"{Sample}_{Class}")))
+            Axis.scatter(Data[Mask, 0], Data[Mask, 1], s=25, alpha=0.5, zorder=2, **Marks)
+            # Misclassified images are drawn again on top, so they are not hidden under the correct ones
+            Axis.scatter(Data[Mask & WrongClassOnly, 0], Data[Mask & WrongClassOnly, 1], s=50, edgecolors=WrongClassEdge, linewidths=1.0, zorder=3, **Marks)
+            Axis.scatter(Data[Mask & WrongState, 0], Data[Mask & WrongState, 1], s=50, edgecolors=WrongStateEdge, linewidths=1.0, zorder=4, **Marks)
 
-    # Prototypes are ordered by the label map, so the look up table gives the class of each prototype
+    # Prototypes are ordered by the label map, so the look up table gives the class of each prototype.
+    # Prototypes of pooled materials (ClassGrouping = State) are drawn as stars.
     for Index, Prototype in enumerate(Prototypes):
-        Sample, Class = TestHandler.LookUpTable[Index].split("_", 1)
-        Axis.scatter(Prototype[0], Prototype[1], s=200, c=SampleColour[Sample], marker=ClassMarker[Class], edgecolors=TextColour, linewidths=1, zorder=3)
+        Colour, Marker = Style(LookUp[Index])
+        Axis.scatter(Prototype[0], Prototype[1], s=160, c=Colour, marker=Marker, edgecolors=PrototypeEdge, linewidths=1.6, zorder=5)
 
-    # Two separate legends, one per encoding, placed outside of the data area
-    MaterialHandles = [Line2D([], [], marker="s", linestyle="", markersize=11, markerfacecolor=SampleColour[Sample], markeredgecolor="white", label=Sample) for Sample in TestHandler.Samples]
-    StateHandles    = [Line2D([], [], marker=ClassMarker[Class], linestyle="", markersize=10, markerfacecolor="#8a8a8a", markeredgecolor="white", label=Class) for Class in TestHandler.Classes]
-    StateHandles.append(Line2D([], [], marker="o", linestyle="", markersize=np.sqrt(200), markerfacecolor="#8a8a8a", markeredgecolor=TextColour, markeredgewidth=1, label="Class prototype"))
+    # Separate legends per encoding, placed outside of the data area
+    MaterialHandles = [Line2D([], [], marker=Style.MaterialMarker[Sample], linestyle="", markersize=10, markerfacecolor="#8a8a8a", markeredgecolor="white", label=Sample)
+                       for Sample in TestHandler.Samples]
+    StateHandles    = [Line2D([], [], marker="s", linestyle="", markersize=11, markerfacecolor=Style.StateColour[Class], markeredgecolor="white", label=Class)
+                       for Class in TestHandler.Classes]
+    StateHandles.append(Line2D([], [], marker="o", linestyle="", markersize=np.sqrt(160), markerfacecolor="#8a8a8a", markeredgecolor=PrototypeEdge, markeredgewidth=1.6, label="Class prototype"))
+    ErrorHandles    = [Line2D([], [], marker="o", linestyle="", markersize=np.sqrt(50), markerfacecolor="#c8c8c8", markeredgecolor=WrongStateEdge, markeredgewidth=1.0,
+                              label=f"Wrong surface state ({WrongState.sum()})"),
+                       Line2D([], [], marker="o", linestyle="", markersize=np.sqrt(50), markerfacecolor="#c8c8c8", markeredgecolor=WrongClassEdge, markeredgewidth=1.0,
+                              label=f"Wrong material only ({WrongClassOnly.sum()})")]
     MaterialLegend = Axis.legend(handles=MaterialHandles, title="Material", loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour)
     Axis.add_artist(MaterialLegend)
-    Axis.legend(handles=StateHandles, title="Surface state", loc="upper left", bbox_to_anchor=(1.02, 0.62), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour, labelspacing=1.0)
-    '''
+    StateLegend = Axis.legend(handles=StateHandles, title="Surface state", loc="upper left", bbox_to_anchor=(1.02, 0.66), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour, labelspacing=1.0)
+    Axis.add_artist(StateLegend)
+    ErrorLegend = Axis.legend(handles=ErrorHandles, title="Misclassified test images", loc="upper left", bbox_to_anchor=(1.02, 0.30), frameon=False, fontsize=12, title_fontsize=13, labelcolor=TextColour, labelspacing=1.0)
 
     Figure.tight_layout()
-    Figure.savefig(f"{Controls.OutputPath}/{Name}.png", dpi=300, bbox_inches="tight")
+    Figure.savefig(f"{Controls.OutputPath}/{Name}.png", dpi=300, bbox_inches="tight", bbox_extra_artists=[MaterialLegend, StateLegend, ErrorLegend]) # all legends count for the figure size
     plt.close(Figure)
 
 def DataSetHeader(LogFile):
     LogFile.W("\nLoading data set\n==================")
-    LogFile.W("*---------------------------------------------------*")
-    LogFile.W("| Class      | Sample     | Mode       | Number     |")
-    LogFile.W("|            |            |            | of images  |")
-    LogFile.W("|------------|------------|------------|------------|")
+    LogFile.W("*-------------------------------------------------------------------*")
+    LogFile.W("| Class      | Material                   | Mode       | Number     |")
+    LogFile.W("|            |                            |            | of images  |")
+    LogFile.W("|------------|----------------------------|------------|------------|")

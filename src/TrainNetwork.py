@@ -1,6 +1,7 @@
 import time
 StartTime = time.time()
 
+import argparse
 import torch
 import os
 import json
@@ -21,30 +22,36 @@ import Modules.NetworkTesting as TEST
 class ControlVariables:
     # Inputs
     DataSet    : str   = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
-    FeatureExtractor : str = "DINOv3"   #  --  "DINOv3" (ViT-B/16)  --  "DINOv3-H16plus" (ViT-H+/16)  --  "DINOv1" (legacy, provided as files only)
+    FeatureExtractor : str = "DINOv3"      #  --  "DINOv3" (ViT-B/16)  --  "DINOv3-H16plus" (ViT-H+/16)  --  "DINOv1" (legacy)
 
     # Network. The input dimension is taken from the feature files (768 for DINOv3 ViT-B/16)
-    EmbeddingDimension   : int   = 8 # 3 to 8 performed equally well in a study (5 seeds each), 8 gave the most consistent results
-    NumberOfHiddenLayers : int   = 4
+    EmbeddingDimension   : int   = 8 # 2 to 32 performed equally well in a study (5 seeds each), 8 gave the most consistent results
+    NumberOfHiddenLayers : int   = 2 # 1 to 4 performed equally well in a study (5 seeds each), 2 gave the most consistent results; 0 and 8 were worse
     Gamma                : float = 0.75
 
-    NumberOfEpisodes               : int   = 250
-    LearningRate                   : float = 1e-4
+    # Training. Chosen in a study on the validation accuracy (5 seeds per setting, see README): the learning rate and the number of episodes
+    # matter most, the number of support and query samples and the weight decay hardly matter
+    NumberOfEpisodes               : int   = 2000  # With LearningRate 1e-3: 97.8 % validation accuracy (1e-4 with 5000 episodes: 97.5 %), confirmed with five further seeds
+    LearningRate                   : float = 1e-3
     WeightDecay                    : float = 1e-2  # AdamW weight decay (1e-2 is the PyTorch default)
-    UseLearningRateScheduler       : bool  = False # Cosine annealing of the learning rate from LearningRate to 0 over NumberOfEpisodes. (slightly worse results than a constant learning rate, but the final validation accuracy is more stable)
+    UseLearningRateScheduler       : bool  = True  # Cosine annealing of the learning rate from LearningRate to 0 over NumberOfEpisodes. Makes the results more consistent between seeds
     Seed                           : int   = 333   # Seed for all random number generators, makes training runs reproducible
     NumberOfClassesPerEpisode      : int   = 6     # N_C =< K
-    NumberOfSupportSamplesPerClass : int   = 10    # N_S
+    NumberOfSupportSamplesPerClass : int   = 5     # N_S
     NumberOfQuerySamplesPerClass   : int   = 10    # N_Q
+    ValidationFraction             : float = 0.25  # Fraction of the training images of each class held back for validation, never used for support or query samples
+    ClassGrouping                  : str   = "MaterialAndState" #  --  "MaterialAndState": one class (prototype) per material and surface state, e.g. 18201-GJSCastIron_Polished  --  "State": materials pooled, one class per surface state (N_C = 2)
 
     # Outputs
-    RunName : str = "TestRun" # Empty input generates a run name based on time and date
+    RunName : str = "" # Name of the output folder Outputs/<RunName>/. Empty: date and time of the start of the run, so runs never overwrite each other
+
+    InteractivePCA         : bool = True  # Also writes PCA_Interactive.html: the test set PCA to explore in a web browser, with image previews
+    InteractivePCAImages   : int  = 1000  # Correctly classified test images shown in PCA_Interactive.html (all misclassified ones are shown). About 5 kB each
 
     # Flags
     #  --  True  --  False  --
-    WriteDetailedDebugInfo   : bool = False     # Enabling this may severely impact performance
-    OverwriteExistingResults : bool = True
-    GenerateRandomSeed       : bool = False
+    WriteDetailedDebugInfo : bool = False # True: also logs every episode, image and feature vector (large log files). Enabling this may severely impact performance
+    GenerateRandomSeed     : bool = False # True: a random Seed is drawn for the run (saved in Settings.json, so the run can still be reproduced)
 
     def __post_init__(self):
         BaseDirectory = os.path.dirname(os.path.abspath(__file__))
@@ -58,10 +65,12 @@ class ControlVariables:
         self.SaveSettings()
 
     def SaveSettings(self):
+        # All settings of the run are saved next to its results, so every run can be reproduced
         with open(f"{self.OutputPath}/Settings.json", "w") as SettingsFile:
             json.dump(asdict(self), SettingsFile, indent=4)
 
     def SetSeed(self):
+        # Episode sampling uses Python's random module and torch, the weight initialisation uses torch
         if self.GenerateRandomSeed:
             self.Seed = random.randint(100000000, 999999999)
         random.seed(self.Seed)
@@ -69,12 +78,17 @@ class ControlVariables:
         torch.manual_seed(self.Seed)
 
 def Main():
-    Controls  = ControlVariables()
-    LogFile = LOG.NoteFile(f"{Controls.OutputPath}/Training.log")
+    Parser = argparse.ArgumentParser(description="Train the prototypical network with the settings in ControlVariables.")
+    Parser.add_argument("--run-name", default=ControlVariables.RunName, help="Name of the output folder src/Outputs/<RunName>/ (default: date and time)")
+    Arguments = Parser.parse_args()
+    if Arguments.run_name and os.path.exists(f"{os.path.dirname(os.path.abspath(__file__))}/Outputs/{Arguments.run_name}"):
+        Parser.error(f"src/Outputs/{Arguments.run_name} already exists, choose another run name")
+    Controls = ControlVariables(RunName=Arguments.run_name)
+    LogFile  = LOG.NoteFile(f"{Controls.OutputPath}/Training.log")
 
     print(f"\nRun {Controls.RunName}\n=======================")
     LogFile.W("\n****************************\n*  Training the Proto Net  *\n****************************")
-    LogFile.W(f"Run {Controls.RunName}")
+    LogFile.W(f"Run {Controls.RunName} - all settings are saved in Settings.json")
 
     DataSet = DATA.DataSet()
     DataSet.LoadDataSet(LogFile, Controls)
@@ -107,10 +121,22 @@ def Main():
         Optimizer.step()
         if Controls.UseLearningRateScheduler:
             Scheduler.step()
-    
+
     LOG.PrintTrainingProcess(LogFile, Controls, RunningLoss, RunningAccuracy, RunningValidationAccuracy)
-    ProtoNet.ComputePrototypes(DataSet.Images, EpisodeLoader.LabelMap)
+
+    # The final prototypes are computed from the training images only, so the held back validation images stay unseen
+    ProtoNet.ComputePrototypes(EpisodeLoader.GetTrainingSet())
     ProtoNet.SaveNetwork(Controls.OutputPath)
+
+    ValidationFeatures, ValidationLabels = EpisodeLoader.GetValidationSet()
+    Classifications = ProtoNet.Classify(ValidationFeatures)
+    ClassAccuracy   = (Classifications == ValidationLabels).float().mean().item()
+    State           = lambda Label: TEST.SurfaceState(EpisodeLoader.LookUpTable[Label])
+    StateAccuracy   = sum(State(Predicted) == State(True_) for Predicted, True_ in zip(Classifications.tolist(), ValidationLabels.tolist())) / len(ValidationLabels)
+    Message = (f"Final validation accuracy (final prototypes, {len(ValidationLabels)} held back training images): "
+               f"{100*ClassAccuracy:.3f} %, surface state {100*StateAccuracy:.3f} %")
+    print(Message)
+    LogFile.W(f"\n{Message}")
 
     TestHandler = TEST.TestHandler(DataSet, EpisodeLoader, ProtoNet)
     TEST.NetworkTestMain(LogFile, Controls, ProtoNet, TestHandler)
