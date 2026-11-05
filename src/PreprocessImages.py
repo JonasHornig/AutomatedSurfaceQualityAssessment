@@ -16,10 +16,10 @@ import Modules.Logging as LOG
 @dataclass
 class ControlVariables:
     # Inputs
-    DataSet : str       = "CompleteDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
+    DataSet : str       = "DummyDataSet" #  --  DummyDataSet  --  SmallDataSet  --  CompleteDataSet
 
     # Feature extractor, see NeuralNetwork.DINOV3_MODELS. The weights are located in <Repository>/src/Models/
-    FeatureExtractor : str = "DINOv3" #  --  "DINOv3" (ViT-B/16)  --  "DINOv3-H16plus" (ViT-H+/16, about 10 times slower)  --  "DINOv1" (legacy, provided as files only)
+    FeatureExtractor : str = "DINOv1" #  --  "DINOv3" (ViT-B/16)  --  "DINOv3-H16plus" (ViT-H+/16, about 10 times slower)  --  "DINOv1" (legacy, provided as files only)
 
     # Flags
     #  --  True  --  False  --
@@ -47,13 +47,18 @@ def IsComplete(HdfFile, Group: str, Names: list[str]) -> bool:
 def Main(LogFile, Controls):
     LogFile.W(f"\n*****************************\n*  Data set pre-processing  *\n*****************************\nData set: {Controls.DataSet}, feature extractor: {Controls.FeatureExtractor}")
 
+    '''
     DinoModel = NN.DINOv3Model(Controls.FeatureExtractor, Controls.ModelDirectory)
     MetaData  = {"FeatureExtractor": DinoModel.HubEntryPoint, "Weights": DinoModel.WeightsName, "HubRepository": NN.DINOV3_HUB_REPOSITORY}
     LogFile.W(f"\nLoading {DinoModel.HubEntryPoint} complete.")
+    '''
+    DinoModel = NN.DINOv2Model()
 
     print("Load images from data set.")
     DataSet = DATA.DataSet(Controls.TargetImageSize)
     DataSet.LoadDataSet(LogFile, Controls, ForceLoadImages=True)
+
+    MetaData = {"Model": "DINOv1"}
 
     LogFile.W("\nProcessing images")
     with tqdm(total=DataSet.TotalNumberOfImages, desc=f"Extracting features", unit=" img") as ProgressBar:

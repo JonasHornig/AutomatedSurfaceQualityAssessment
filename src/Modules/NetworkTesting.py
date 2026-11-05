@@ -1,5 +1,9 @@
 import numpy as np
+from PIL import Image
+
 import torch
+import torch.nn.functional as F
+from torchvision import transforms
 
 from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix
@@ -40,12 +44,20 @@ class TestHandler():
         if Controls.WriteDetailedDebugInfo:
             LOG.DataExtraction(LogFile, self.PreparedData)
 
+        for Img in self.Images["18201"]["Polished"]["Training"]["Names"]:
+            if "2310602045" in Img:
+                print(f"Training: {Img}")
+
+        for Img in self.Images["18201"]["Polished"]["Testing"]["Names"]:
+            if "2310602045" in Img:
+                print(f"Testing: {Img}")
+
 def NetworkTestMain(LogFile, Controls, ProtoNet, TestHandler):
     LogFile.W("\n******************************\n*   Testing the Proto Net    *\n******************************")
     print("\nTesting the trained network")
     NetworkTestApplication(LogFile, Controls, ProtoNet, TestHandler)
     PrincipalComponentAnalysis(Controls, TestHandler)
-    PlotSurfaceStateScores(Controls, TestHandler)
+    OcclusionSensitivity(LogFile, Controls, ProtoNet, TestHandler)
 
 def NetworkTestApplication(LogFile, Controls, Network, TestHandler):
     TestHandler.ExtractData(LogFile, Controls, "Testing")
@@ -103,10 +115,63 @@ def PrincipalComponentAnalysis(Controls, TestHandler, NumberOfComponents: int = 
 
     Embeddings = TestHandler.PreparedData["Embeddings"].numpy()
     Pca        = PCA(n_components=NumberOfComponents).fit(Embeddings)
-    EmbeddingView = {"Name": "Embeddings", "Coordinates": Pca.transform(Embeddings), "Variance": Pca.explained_variance_ratio_,
-                     "Prototypes": Pca.transform(TestHandler.Prototypes.numpy())}
-    LOG.PlotPrincipalComponentAnalysis(Controls, TestHandler, EmbeddingView["Coordinates"], EmbeddingView["Variance"],
-                                       "PCA_Embeddings", EmbeddingView["Prototypes"], Title="Embeddings (Test data & Prototypes)")
+    LOG.PlotPrincipalComponentAnalysis(Controls, TestHandler, Pca.transform(Embeddings), Pca.explained_variance_ratio_, "PCA_Embeddings", Pca.transform(TestHandler.Prototypes.numpy()), Title="Embeddings (Test data & Prototypes)")
 
-    if Controls.InteractivePCA:
-        IPCA.WriteInteractivePCA(Controls, TestHandler, [EmbeddingView, FeatureView], Controls.InteractivePCAImages)
+def OcclusionSensitivity(LogFile, Controls, ProtoNet, TestHandler, Index: int = 0, Mode: str = "Testing", WindowSize: int = 64, Stride: int = 16):
+    Label      = TestHandler.PreparedData["Labels"][Index]
+    Sample     = Label.split("_")[0]
+    Class      = Label.split("_")[1]
+    Name       = TestHandler.PreparedData["Names"][Index]
+    ImagePath  = f"{Controls.DataSetPath}/Images/{Sample}/{Class}/{Mode}/{Name}"
+
+    print(Name)
+
+    PilImage   = Image.open(ImagePath).convert("RGB")
+    ImageArray = np.array(PilImage)
+    ImageHeight, ImageWidth = ImageArray.shape[:2]
+
+    def GetConfidence(PilImg: Image.Image) -> float:
+        DinoPreprocessor = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        InputTensor = DinoPreprocessor(PilImg).unsqueeze(0)   # [1, 3, H, W]
+        with torch.no_grad():
+            DinoFeatures = ProtoNet.DinoModel(InputTensor)    # [1, 768]
+            Embedding    = ProtoNet.Encoder(DinoFeatures)     # [1, EmbeddingDim]
+            Distances    = NN.EuclideanDistance(Embedding, ProtoNet.Prototypes)  # [1, NC]
+            Probabilities = F.softmax(-Distances, dim=1)      # [1, NC]
+
+        PredictedIndex = TestHandler.LabelMap[Label]
+        return Probabilities[0, PredictedIndex].item()
+
+    BaselineConfidence = GetConfidence(PilImage)
+
+    HeatMap = np.zeros((ImageHeight, ImageWidth), dtype=np.float32)
+    Counts  = np.zeros((ImageHeight, ImageWidth), dtype=np.float32)
+
+    YPositions = range(0, ImageHeight - WindowSize + 1, Stride)
+    XPositions = range(0, ImageWidth  - WindowSize + 1, Stride)
+
+    for YPosition in YPositions:
+        for XPosition in XPositions:
+            OccludedArray = ImageArray.copy()
+            MeanColor = ImageArray[YPosition : YPosition + WindowSize, XPosition : XPosition + WindowSize,].mean(axis=(0, 1)).astype(np.uint8)
+            OccludedArray[
+                YPosition : YPosition + WindowSize,
+                XPosition : XPosition + WindowSize,
+            ] = MeanColor
+
+            OccludedImage      = Image.fromarray(OccludedArray)
+            OccludedConfidence = GetConfidence(OccludedImage)
+            ConfidenceDrop     = BaselineConfidence - OccludedConfidence
+
+            HeatMap[YPosition : YPosition + WindowSize,
+                    XPosition : XPosition + WindowSize] += ConfidenceDrop
+            Counts[ YPosition : YPosition + WindowSize,
+                    XPosition : XPosition + WindowSize] += 1
+
+    Counts[Counts == 0] = 1
+    HeatMap /= Counts
+
+    return HeatMap, BaselineConfidence
